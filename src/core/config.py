@@ -21,3 +21,6 @@ class Settings(BaseSettings):
             port=self.db_port,
             path=self.db_name,
         )
+
+
+settings = Settings()  # pyright: ignore[reportCallIssue]
