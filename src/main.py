@@ -2,8 +2,11 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from src.api.deps import SessionDep
+from src.api.v1.routes.endpoint import router as endpoint_router
 
 app = FastAPI()
+
+app.include_router(endpoint_router, prefix="/api/v1")
 
 
 @app.get("/health")
