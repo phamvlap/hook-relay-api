@@ -10,7 +10,7 @@ from src.schemas.endpoint import (
 )
 from src.services.endpoint import EndpointService
 
-router = APIRouter(prefix="/endpoints", tags=["Endpoints"])
+router = APIRouter()
 
 
 @router.get("")
