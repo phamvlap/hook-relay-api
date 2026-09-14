@@ -1,11 +1,13 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
-from src.api.deps import get_endpoint_service
+from src.api.deps import get_endpoint_service, get_page_number_pagination_params
+from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.schemas.endpoint import (
     EndpointCreateRequest,
     EndpointCreateResponse,
+    EndpointListResponse,
     EndpointRetrieveResponse,
 )
 from src.services.endpoint import EndpointService
@@ -13,12 +15,16 @@ from src.services.endpoint import EndpointService
 router = APIRouter()
 
 
-@router.get("")
-async def get_endpoints():
+@router.get("", response_model=PageNumberPaginationResponse[EndpointListResponse])
+async def get_endpoints(
+    request: Request,
+    page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
+    endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
+) -> PageNumberPaginationResponse[EndpointListResponse]:
     """
     Get all endpoints.
     """
-    return {"message": "Get all endpoints."}
+    return await endpoint_service.list(request=request, page_params=page_params)
 
 
 @router.post("", response_model=EndpointCreateResponse, status_code=status.HTTP_201_CREATED)

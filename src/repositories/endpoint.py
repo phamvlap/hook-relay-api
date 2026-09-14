@@ -15,4 +15,17 @@ class EndpointRepository:
         return endpoint
 
     async def get_by_id(self, *, id: str) -> WebhookEndpoint | None:
-        return self.session.query(WebhookEndpoint).filter_by(id=id).first()
+        return self.session.query(WebhookEndpoint).filter_by(id=id, deleted_at=None).first()
+
+    async def count(self) -> int:
+        return self.session.query(WebhookEndpoint).filter_by(deleted_at=None).count()
+
+    async def list(self, *, offset: int = 0, limit: int = 10) -> list[WebhookEndpoint]:
+        return (
+            self.session.query(WebhookEndpoint)
+            .filter_by(deleted_at=None)
+            .order_by(WebhookEndpoint.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )

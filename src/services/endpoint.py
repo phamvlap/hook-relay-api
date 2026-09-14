@@ -1,7 +1,11 @@
+from fastapi import Request
+
+from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.repositories.endpoint import EndpointRepository
 from src.schemas.endpoint import (
     EndpointCreateRequest,
     EndpointCreateResponse,
+    EndpointListResponse,
     EndpointRetrieveResponse,
 )
 from src.utils.endpoint import validate_url
@@ -32,3 +36,21 @@ class EndpointService:
             raise ValueError(f"Endpoint with ID {endpoint_id} not found.")
 
         return EndpointRetrieveResponse.model_validate(endpoint)
+
+    async def list(
+        self,
+        request: Request,
+        page_params: PageNumberPaginationParams,
+    ) -> PageNumberPaginationResponse[EndpointListResponse]:
+        total = await self.endpoint_repository.count()
+        endpoints = await self.endpoint_repository.list(
+            offset=page_params.offset,
+            limit=page_params.limit,
+        )
+        return PageNumberPaginationResponse.build(
+            request=request,
+            total=total,
+            page=page_params.page,
+            page_size=page_params.page_size,
+            items=[EndpointListResponse.model_validate(endpoint) for endpoint in endpoints],
+        )

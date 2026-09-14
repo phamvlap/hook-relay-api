@@ -32,3 +32,14 @@ class EndpointRetrieveResponse(BaseModel):
     status: WebhookEndpointStatus
     max_retries: int
     created_at: datetime
+
+
+class EndpointListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    url: str
+    status: WebhookEndpointStatus
+    max_retries: int
+    created_at: datetime
