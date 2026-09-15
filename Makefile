@@ -20,6 +20,9 @@ dev-install:
 run:
 	uv run uvicorn src.main:app --reload
 
+celery-worker:
+	uv run celery -A src.tasks.celery_app worker --loglevel=info
+
 # Database migrations
 init-migrations:
 	alembic init alembic
