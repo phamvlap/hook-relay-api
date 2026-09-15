@@ -3,12 +3,14 @@ from sqlalchemy import text
 
 from src.api.deps import SessionDep
 from src.api.v1.routes import router as v1_router
+from src.core.error_handlers import register_exception_handlers
 
 app = FastAPI(
     title="Hook Relay API",
     description="A simple API for relaying webhooks.",
     version="1.0",
 )
+register_exception_handlers(app)
 
 app.include_router(v1_router, prefix="/api/v1")
 
