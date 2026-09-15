@@ -9,6 +9,8 @@ from src.schemas.endpoint import (
     EndpointCreateResponse,
     EndpointListResponse,
     EndpointRetrieveResponse,
+    EndpointUpdateRequest,
+    EndpointUpdateResponse,
 )
 from src.services.endpoint import EndpointService
 
@@ -49,17 +51,24 @@ async def get_endpoint(
     return await endpoint_service.retrieve(endpoint_id)
 
 
-@router.put("/{endpoint_id}")
-async def update_endpoint(endpoint_id: str):
+@router.patch("/{endpoint_id}", response_model=EndpointUpdateResponse)
+async def update_endpoint(
+    endpoint_id: str,
+    data: EndpointUpdateRequest,
+    endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
+) -> EndpointUpdateResponse:
     """
     Update an endpoint by ID.
     """
-    return {"message": f"Update endpoint with ID {endpoint_id}."}
+    return await endpoint_service.update(endpoint_id, data)
 
 
 @router.delete("/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_endpoint(endpoint_id: str):
+async def delete_endpoint(
+    endpoint_id: str,
+    endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
+) -> None:
     """
     Delete an endpoint by ID.
     """
-    return {"message": f"Delete endpoint with ID {endpoint_id}."}
+    return await endpoint_service.delete(endpoint_id)

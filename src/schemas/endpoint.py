@@ -43,3 +43,20 @@ class EndpointListResponse(BaseModel):
     status: WebhookEndpointStatus
     max_retries: int
     created_at: datetime
+
+
+class EndpointUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    url: AnyHttpUrl | None = Field(default=None)
+    max_retries: int | None = Field(default=None, ge=0, le=20)
+
+
+class EndpointUpdateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    url: str
+    status: WebhookEndpointStatus
+    max_retries: int
+    created_at: datetime

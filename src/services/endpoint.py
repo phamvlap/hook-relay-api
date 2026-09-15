@@ -1,12 +1,15 @@
 from fastapi import Request
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
+from src.exceptions.endpoint import EndpointNotFoundError, EndpointValidationError
 from src.repositories.endpoint import EndpointRepository
 from src.schemas.endpoint import (
     EndpointCreateRequest,
     EndpointCreateResponse,
     EndpointListResponse,
     EndpointRetrieveResponse,
+    EndpointUpdateRequest,
+    EndpointUpdateResponse,
 )
 from src.utils.endpoint import validate_url
 
@@ -20,7 +23,7 @@ class EndpointService:
 
         is_valid_url = validate_url(url)
         if not is_valid_url:
-            raise ValueError("Invalid URL provided.")
+            raise EndpointValidationError("Invalid URL provided.")
 
         endpoint = await self.endpoint_repository.create(
             name=data.name,
@@ -33,7 +36,7 @@ class EndpointService:
     async def retrieve(self, endpoint_id: str) -> EndpointRetrieveResponse:
         endpoint = await self.endpoint_repository.get_by_id(id=endpoint_id)
         if not endpoint:
-            raise ValueError(f"Endpoint with ID {endpoint_id} not found.")
+            raise EndpointNotFoundError()
 
         return EndpointRetrieveResponse.model_validate(endpoint)
 
@@ -54,3 +57,30 @@ class EndpointService:
             page_size=page_params.page_size,
             items=[EndpointListResponse.model_validate(endpoint) for endpoint in endpoints],
         )
+
+    async def update(self, endpoint_id: str, data: EndpointUpdateRequest) -> EndpointUpdateResponse:
+        endpoint = await self.endpoint_repository.get_by_id(id=endpoint_id)
+        if not endpoint:
+            raise EndpointNotFoundError()
+
+        update_data = data.model_dump(exclude_unset=True)
+        if "url" in update_data:
+            url = str(update_data["url"])
+            is_valid_url = validate_url(url)
+            if not is_valid_url:
+                raise EndpointValidationError("Invalid URL provided.")
+            update_data["url"] = url
+
+        updated_endpoint = await self.endpoint_repository.update(
+            endpoint=endpoint,
+            data=update_data,
+        )
+
+        return EndpointUpdateResponse.model_validate(updated_endpoint)
+
+    async def delete(self, endpoint_id: str) -> None:
+        endpoint = await self.endpoint_repository.get_by_id(id=endpoint_id)
+        if not endpoint:
+            raise EndpointNotFoundError()
+
+        await self.endpoint_repository.soft_delete(endpoint=endpoint)

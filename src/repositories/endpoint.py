@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import Session
 
 from src.models.endpoint import WebhookEndpoint
@@ -29,3 +31,22 @@ class EndpointRepository:
             .limit(limit)
             .all()
         )
+
+    async def update(
+        self,
+        *,
+        endpoint: WebhookEndpoint,
+        data: dict[str, str | int | None],
+    ) -> WebhookEndpoint:
+        for key, value in data.items():
+            setattr(endpoint, key, value)
+
+        self.session.flush()
+        self.session.commit()
+        self.session.refresh(endpoint)
+        return endpoint
+
+    async def soft_delete(self, *, endpoint: WebhookEndpoint) -> None:
+        endpoint.deleted_at = datetime.now(tz=UTC)
+        self.session.flush()
+        self.session.commit()
