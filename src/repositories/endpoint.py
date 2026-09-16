@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from src.models.endpoint import WebhookEndpoint
+from src.models.endpoint import WebhookEndpoint, WebhookEndpointStatus
 
 
 class EndpointRepository:
@@ -22,15 +22,29 @@ class EndpointRepository:
     async def count(self) -> int:
         return self.session.query(WebhookEndpoint).filter_by(deleted_at=None).count()
 
-    async def list(self, *, offset: int = 0, limit: int = 10) -> list[WebhookEndpoint]:
-        return (
+    async def list(
+        self,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+        status: WebhookEndpointStatus | None = None,
+    ) -> list[WebhookEndpoint]:
+        query = (
             self.session.query(WebhookEndpoint)
             .filter_by(deleted_at=None)
             .order_by(WebhookEndpoint.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
         )
+
+        if status is not None:
+            query = query.filter_by(status=status)
+
+        if offset is not None:
+            query = query.offset(offset)
+
+        if limit is not None:
+            query = query.limit(limit)
+
+        return query.all()
 
     async def update(
         self,
