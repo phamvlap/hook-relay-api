@@ -21,3 +21,25 @@ class EventCreateResponse(BaseModel):
     status: WebhookEventStatus
     created_at: datetime
     updated_at: datetime
+
+
+class EventListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_type: str
+    payload: dict[str, Any]
+    status: WebhookEventStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class EventRetrieveResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_type: str
+    payload: dict[str, Any]
+    status: WebhookEventStatus
+    created_at: datetime
+    updated_at: datetime

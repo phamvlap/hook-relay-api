@@ -15,8 +15,8 @@ from src.utils.endpoint import validate_url
 
 
 class EndpointService:
-    def __init__(self, endpoint_repository: EndpointRepository):
-        self.endpoint_repository = endpoint_repository
+    def __init__(self, endpoint_repository: EndpointRepository | None = None):
+        self.endpoint_repository = endpoint_repository or EndpointRepository()
 
     async def create(self, data: EndpointCreateRequest) -> EndpointCreateResponse:
         url = str(data.url)

@@ -10,6 +10,7 @@ from src.database.session import get_local_session
 from src.repositories.delivery import DeliveryRepository
 from src.repositories.endpoint import EndpointRepository
 from src.repositories.event import EventRepository
+from src.services.delivery import DeliveryService
 from src.services.endpoint import EndpointService
 from src.services.event import EventService
 
@@ -41,6 +42,12 @@ def get_endpoint_service(
     endpoint_repository: Annotated[EndpointRepository, Depends(get_endpoint_repository)],
 ) -> EndpointService:
     return EndpointService(endpoint_repository=endpoint_repository)
+
+
+def get_delivery_service(
+    delivery_repository: Annotated[DeliveryRepository, Depends(get_delivery_repository)],
+) -> DeliveryService:
+    return DeliveryService(delivery_repository=delivery_repository)
 
 
 def get_event_service(

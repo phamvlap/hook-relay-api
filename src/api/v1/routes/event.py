@@ -1,12 +1,17 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 
-from src.api.deps import get_event_service
+from src.api.deps import get_delivery_service, get_event_service, get_page_number_pagination_params
+from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
+from src.schemas.delivery import DeliveryListInEvent
 from src.schemas.event import (
     EventCreateRequest,
     EventCreateResponse,
+    EventListResponse,
+    EventRetrieveResponse,
 )
+from src.services.delivery import DeliveryService
 from src.services.event import EventService
 
 router = APIRouter()
@@ -21,3 +26,46 @@ async def create_event(
     Create a new event.
     """
     return await event_service.create(data)
+
+
+@router.get("", response_model=EventListResponse)
+async def list_events(
+    request: Request,
+    page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
+    event_service: Annotated[EventService, Depends(get_event_service)],
+) -> PageNumberPaginationResponse[EventListResponse]:
+    """
+    List all events.
+    """
+    return await event_service.list(request=request, page_params=page_params)
+
+
+@router.get("/{event_id}", response_model=EventRetrieveResponse)
+async def retrieve_event(
+    event_id: str,
+    event_service: Annotated[EventService, Depends(get_event_service)],
+) -> EventRetrieveResponse:
+    """
+    Retrieve an event by its ID.
+    """
+    return await event_service.retrieve(event_id=event_id)
+
+
+@router.get(
+    "/{event_id}/deliveries",
+    response_model=PageNumberPaginationResponse[DeliveryListInEvent],
+)
+async def list_deliveries_in_event(
+    event_id: str,
+    request: Request,
+    page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
+    delivery_service: Annotated[DeliveryService, Depends(get_delivery_service)],
+) -> PageNumberPaginationResponse[DeliveryListInEvent]:
+    """
+    List all deliveries associated with a specific event.
+    """
+    return await delivery_service.list_by_event(
+        event_id=event_id,
+        request=request,
+        page_params=page_params,
+    )

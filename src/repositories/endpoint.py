@@ -2,11 +2,15 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from src.core.config import settings
+from src.database.session import get_local_session
 from src.models.endpoint import WebhookEndpoint, WebhookEndpointStatus
 
 
 class EndpointRepository:
-    def __init__(self, session: Session):
+    def __init__(self, session: Session | None = None):
+        if session is None:
+            session = get_local_session(str(settings.postgres_dsn))
         self.session = session
 
     async def create(self, *, name: str, url: str, max_retries: int) -> WebhookEndpoint:
@@ -29,14 +33,12 @@ class EndpointRepository:
         limit: int | None = None,
         status: WebhookEndpointStatus | None = None,
     ) -> list[WebhookEndpoint]:
-        query = (
-            self.session.query(WebhookEndpoint)
-            .filter_by(deleted_at=None)
-            .order_by(WebhookEndpoint.created_at.desc())
-        )
+        query = self.session.query(WebhookEndpoint).filter_by(deleted_at=None)
 
         if status is not None:
             query = query.filter_by(status=status)
+
+        query = query.order_by(WebhookEndpoint.created_at.desc())
 
         if offset is not None:
             query = query.offset(offset)
