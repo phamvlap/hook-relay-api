@@ -6,6 +6,7 @@ from fastapi import Request
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.exceptions.event import EventNotFoundError
 from src.models.endpoint import WebhookEndpointStatus
+from src.models.event import WebhookEventStatus
 from src.repositories.delivery import DeliveryRepository
 from src.repositories.endpoint import EndpointRepository
 from src.repositories.event import EventRepository
@@ -36,6 +37,13 @@ class EventService:
         )
 
         endpoints = await self.endpoint_repository.list(status=WebhookEndpointStatus.ACTIVE)
+
+        if not endpoints:
+            await self.event_repository.update(
+                event=event,
+                data={"status": WebhookEventStatus.COMPLETED},
+            )
+            return EventCreateResponse.model_validate(event)
 
         deliveries_data = [
             {

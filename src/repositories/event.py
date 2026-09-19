@@ -1,10 +1,11 @@
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.database.session import get_local_session
-from src.models.event import WebhookEvent
+from src.models.event import WebhookEvent, resolve_event_status
 
 
 class EventRepository:
@@ -61,3 +62,31 @@ class EventRepository:
         self.session.commit()
         self.session.refresh(event)
         return event
+
+    async def resolve_and_update_status(self, *, event_id: str) -> WebhookEvent | None:
+        try:
+            event = (
+                self.session.query(WebhookEvent)
+                .filter_by(id=event_id, deleted_at=None)
+                .with_for_update()
+                .first()
+            )
+
+            if not event:
+                self.session.rollback()
+                return None
+
+            delivery_statuses = [delivery.status for delivery in event.deliveries]
+            resolved_status = resolve_event_status(delivery_statuses)
+
+            if event.status != resolved_status:
+                event.status = resolved_status
+                self.session.flush()
+
+            self.session.commit()
+            self.session.refresh(event)
+            return event
+
+        except SQLAlchemyError:
+            self.session.rollback()
+            return None

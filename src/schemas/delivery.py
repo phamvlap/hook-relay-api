@@ -7,11 +7,19 @@ from pydantic import BaseModel, ConfigDict
 from src.models.delivery import WebhookDeliveryStatus
 
 
+class NestedEndpointForDeliveryListInEvent(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    url: str
+
+
 class DeliveryListInEvent(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    endpoint_id: UUID
+    endpoint: NestedEndpointForDeliveryListInEvent
     attempt: int
     status: WebhookDeliveryStatus
     status_code: int | None

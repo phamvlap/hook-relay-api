@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from src.core.config import settings
 from src.database.session import get_local_session
@@ -65,10 +65,12 @@ class DeliveryRepository:
         query = self.session.query(WebhookDelivery).filter_by(deleted_at=None)
 
         if event_id is not None:
-            query = query.filter_by(event_id=event_id)
+            query = query.filter_by(event_id=event_id).options(selectinload(WebhookDelivery.event))
 
         if endpoint_id is not None:
-            query = query.filter_by(endpoint_id=endpoint_id)
+            query = query.filter_by(endpoint_id=endpoint_id).options(
+                selectinload(WebhookDelivery.endpoint)
+            )
 
         query = query.order_by(WebhookDelivery.created_at.desc())
 
@@ -108,14 +110,16 @@ class DeliveryRepository:
         *,
         delivery: WebhookDelivery,
         status_code: int,
-        response_body: dict[str, Any],
+        response_body: dict[str, Any] | None,
         duration_ms: int,
     ) -> WebhookDelivery:
         delivery.status = WebhookDeliveryStatus.SUCCESS
         delivery.status_code = status_code
-        delivery.response_body = response_body
         delivery.duration_ms = duration_ms
         delivery.delivered_at = datetime.now(tz=UTC)
+
+        if response_body is not None:
+            delivery.response_body = response_body
 
         self.session.flush()
         self.session.commit()

@@ -1,6 +1,6 @@
 import time
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import Any, cast
 
 import httpx
 from celery import Task
@@ -13,6 +13,14 @@ from src.repositories.endpoint import EndpointRepository
 from src.repositories.event import EventRepository
 from src.schemas.delivery import DeliveryListInEvent
 from src.tasks.webhook import deliver_webhook_task
+
+
+def _create_httpx_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(10.0, connect=5.0, read=10.0, write=10.0, pool=None),
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+    )
 
 
 class DeliveryService:
@@ -41,6 +49,7 @@ class DeliveryService:
             return
 
         await self.delivery_repository.mark_as_delivering(delivery=delivery)
+        await self._sync_event_status(event_id=str(event.id))
 
         payload = {
             "id": str(event.id),
@@ -58,15 +67,23 @@ class DeliveryService:
         start_time = time.monotonic()
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with _create_httpx_client() as client:
                 response = await client.post(
                     endpoint.url,
                     json=payload,
                     headers=headers,
-                    timeout=10.0,
                 )
 
             duration_ms = int((time.monotonic() - start_time) * 1000)
+
+        except httpx.InvalidURL as exc:
+            await self.delivery_repository.mark_as_failed(
+                delivery=delivery,
+                status_code=None,
+                error_message=str(exc),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+            )
+            return
 
         except httpx.TimeoutException as exc:
             await self._process_retry_or_failure(
@@ -92,7 +109,7 @@ class DeliveryService:
             await self.delivery_repository.mark_as_success(
                 delivery=delivery,
                 status_code=response.status_code,
-                response_body=response.json(),
+                response_body=self._get_response_body(response),
                 duration_ms=duration_ms,
             )
             return
@@ -111,16 +128,26 @@ class DeliveryService:
         await self.delivery_repository.mark_as_failed(
             delivery=delivery,
             status_code=response.status_code,
-            response_body=response.json(),
+            response_body=self._get_response_body(response),
             error_message=f"Received status code {response.status_code}",
             duration_ms=duration_ms,
         )
+        await self._sync_event_status(event_id=str(event.id))
 
     def _is_successful_status(self, status_code: int) -> bool:
         return 200 <= status_code < 300
 
     def _should_retry(self, status_code: int) -> bool:
         return status_code == 408 or status_code == 429 or (500 <= status_code < 600)
+
+    def _get_response_body(self, response: httpx.Response) -> dict[str, Any] | None:
+        try:
+            return response.json()
+        except (TypeError, ValueError):
+            return None
+
+    async def _sync_event_status(self, event_id: str) -> None:
+        await self.event_repository.resolve_and_update_status(event_id=event_id)
 
     async def _process_retry_or_failure(
         self,
@@ -141,6 +168,7 @@ class DeliveryService:
                 error_message=error_message,
                 duration_ms=duration_ms,
             )
+            await self._sync_event_status(event_id=str(delivery.event_id))
             return
 
         if attempt >= max_retries:
@@ -151,6 +179,7 @@ class DeliveryService:
                 error_message=error_message,
                 duration_ms=duration_ms,
             )
+            await self._sync_event_status(event_id=str(delivery.event_id))
             return
 
         retry_delay = self._compute_retry_delay(attempt)
@@ -162,6 +191,7 @@ class DeliveryService:
             duration_ms=duration_ms,
             next_retry_at=self._compute_next_retry_time(retry_delay),
         )
+        await self._sync_event_status(event_id=str(delivery.event_id))
 
         task = cast(Task, deliver_webhook_task)
         task.apply_async(args=[str(delivery.id)], countdown=retry_delay)

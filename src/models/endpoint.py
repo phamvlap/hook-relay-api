@@ -5,6 +5,7 @@ from sqlalchemy import Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import BaseModel
+from src.models.delivery import WebhookDelivery
 
 
 class WebhookEndpointStatus(StrEnum):
@@ -25,7 +26,7 @@ class WebhookEndpoint(BaseModel):
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
 
     # Relationships
-    deliveries = relationship(
+    deliveries: Mapped[list[WebhookDelivery]] = relationship(
         "WebhookDelivery",
         back_populates="endpoint",
         cascade="all, delete-orphan",

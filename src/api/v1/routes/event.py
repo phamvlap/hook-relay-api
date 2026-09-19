@@ -28,7 +28,7 @@ async def create_event(
     return await event_service.create(data)
 
 
-@router.get("", response_model=EventListResponse)
+@router.get("", response_model=PageNumberPaginationResponse[EventListResponse])
 async def list_events(
     request: Request,
     page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
