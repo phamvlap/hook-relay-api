@@ -30,3 +30,70 @@ class DeliveryListInEvent(BaseModel):
     delivered_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class NestedEndpointForDeliveryListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    url: str
+
+
+class NestedEventForDeliveryListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_type: str
+
+
+class DeliveryListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    endpoint: NestedEndpointForDeliveryListResponse
+    event: NestedEventForDeliveryListResponse
+    attempt: int
+    status: WebhookDeliveryStatus
+    status_code: int | None
+    response_body: dict[str, Any] | None
+    error_message: str | None
+    duration_ms: int | None
+    next_retry_at: datetime | None
+    delivered_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class NestedEndpointForDeliveryRetrieveResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    url: str
+
+
+class NestedEventForDeliveryRetrieveResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_type: str
+    payload: dict[str, Any]
+
+
+class DeliveryRetrieveResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    endpoint: NestedEndpointForDeliveryRetrieveResponse
+    event: NestedEventForDeliveryRetrieveResponse
+    attempt: int
+    status: WebhookDeliveryStatus
+    status_code: int | None
+    response_body: dict[str, Any] | None
+    error_message: str | None
+    duration_ms: int | None
+    next_retry_at: datetime | None
+    delivered_at: datetime | None
+    created_at: datetime
+    updated_at: datetime

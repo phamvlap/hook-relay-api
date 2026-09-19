@@ -7,11 +7,12 @@ from celery import Task
 from fastapi import Request
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
+from src.exceptions.delivery import DeliveryNotFoundError
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
 from src.repositories.delivery import DeliveryRepository
 from src.repositories.endpoint import EndpointRepository
 from src.repositories.event import EventRepository
-from src.schemas.delivery import DeliveryListInEvent
+from src.schemas.delivery import DeliveryListInEvent, DeliveryListResponse, DeliveryRetrieveResponse
 from src.tasks.webhook import deliver_webhook_task
 
 
@@ -225,3 +226,40 @@ class DeliveryService:
             page_size=page_params.page_size,
             items=[DeliveryListInEvent.model_validate(item) for item in items],
         )
+
+    async def list(
+        self,
+        *,
+        request: Request,
+        page_params: PageNumberPaginationParams,
+        event_id: str | None = None,
+        endpoint_id: str | None = None,
+        status: WebhookDeliveryStatus | None = None,
+    ) -> PageNumberPaginationResponse[DeliveryListResponse]:
+        total_count = await self.delivery_repository.count(
+            event_id=event_id,
+            endpoint_id=endpoint_id,
+            status=status,
+        )
+        items = await self.delivery_repository.list(
+            event_id=event_id,
+            endpoint_id=endpoint_id,
+            offset=page_params.offset,
+            limit=page_params.limit,
+            status=status,
+        )
+
+        return PageNumberPaginationResponse.build(
+            request=request,
+            total=total_count,
+            page=page_params.page,
+            page_size=page_params.page_size,
+            items=[DeliveryListResponse.model_validate(item) for item in items],
+        )
+
+    async def retrieve(self, *, delivery_id: str) -> DeliveryRetrieveResponse:
+        delivery = await self.delivery_repository.get_by_id(id=delivery_id)
+        if not delivery:
+            raise DeliveryNotFoundError()
+
+        return DeliveryRetrieveResponse.model_validate(delivery)

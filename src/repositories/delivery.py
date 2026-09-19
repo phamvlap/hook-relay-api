@@ -41,9 +41,19 @@ class DeliveryRepository:
         return deliveries
 
     async def get_by_id(self, *, id: str) -> WebhookDelivery | None:
-        return self.session.query(WebhookDelivery).filter_by(id=id, deleted_at=None).first()
+        return (
+            self.session.query(WebhookDelivery)
+            .filter_by(id=id, deleted_at=None)
+            .options(selectinload(WebhookDelivery.endpoint), selectinload(WebhookDelivery.event))
+            .first()
+        )
 
-    async def count(self, event_id: str | None = None, endpoint_id: str | None = None) -> int:
+    async def count(
+        self,
+        event_id: str | None = None,
+        endpoint_id: str | None = None,
+        status: WebhookDeliveryStatus | None = None,
+    ) -> int:
         query = self.session.query(WebhookDelivery).filter_by(deleted_at=None)
 
         if event_id is not None:
@@ -51,6 +61,9 @@ class DeliveryRepository:
 
         if endpoint_id is not None:
             query = query.filter_by(endpoint_id=endpoint_id)
+
+        if status is not None:
+            query = query.filter_by(status=status)
 
         return query.count()
 
@@ -61,6 +74,7 @@ class DeliveryRepository:
         limit: int | None = None,
         event_id: str | None = None,
         endpoint_id: str | None = None,
+        status: WebhookDeliveryStatus | None = None,
     ) -> list[WebhookDelivery]:
         query = self.session.query(WebhookDelivery).filter_by(deleted_at=None)
 
@@ -71,6 +85,9 @@ class DeliveryRepository:
             query = query.filter_by(endpoint_id=endpoint_id).options(
                 selectinload(WebhookDelivery.endpoint)
             )
+
+        if status is not None:
+            query = query.filter_by(status=status)
 
         query = query.order_by(WebhookDelivery.created_at.desc())
 
