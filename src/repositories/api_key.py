@@ -1,0 +1,33 @@
+from sqlalchemy.orm import Session
+
+from src.core.config import settings
+from src.database.session import get_local_session
+from src.models.api_key import APIKey, APIKeyEnvironment
+
+
+class APIKeyRepository:
+    def __init__(self, session: Session | None = None):
+        if session is None:
+            session = get_local_session(str(settings.postgres_dsn))
+        self.session = session
+
+    async def create(
+        self,
+        *,
+        owner_id: str,
+        name: str,
+        key_id: str,
+        key_hash: str,
+        environment: APIKeyEnvironment = APIKeyEnvironment.TEST,
+    ) -> APIKey:
+        api_key = APIKey(
+            owner_id=owner_id,
+            name=name,
+            key_id=key_id,
+            key_hash=key_hash,
+            environment=environment,
+        )
+        self.session.add(api_key)
+        self.session.commit()
+        self.session.refresh(api_key)
+        return api_key

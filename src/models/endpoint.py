@@ -1,7 +1,8 @@
 from enum import StrEnum
+from uuid import UUID
 
 from sqlalchemy import Enum as SQLEnum
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import BaseModel
@@ -15,6 +16,11 @@ class WebhookEndpointStatus(StrEnum):
 
 class WebhookEndpoint(BaseModel):
     __tablename__ = "webhook_endpoints"
+
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("owners.id", ondelete="CASCADE"),
+        nullable=False,
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -31,3 +37,4 @@ class WebhookEndpoint(BaseModel):
         back_populates="endpoint",
         cascade="all, delete-orphan",
     )
+    owner = relationship("Owner", back_populates="endpoints")

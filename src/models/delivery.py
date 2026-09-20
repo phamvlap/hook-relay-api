@@ -31,6 +31,10 @@ class WebhookDelivery(BaseModel):
         ForeignKey("webhook_endpoints.id", ondelete="CASCADE"),
         nullable=False,
     )
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("owners.id", ondelete="CASCADE"),
+        nullable=False,
+    )
 
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[WebhookDeliveryStatus] = mapped_column(
@@ -48,3 +52,4 @@ class WebhookDelivery(BaseModel):
     # Relationships
     event = relationship("WebhookEvent", back_populates="deliveries")
     endpoint = relationship("WebhookEndpoint", back_populates="deliveries")
+    owner = relationship("Owner", back_populates="deliveries")

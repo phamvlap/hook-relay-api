@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     redis_db: int = Field(ge=0, le=10)
     redis_enabled_ssl: bool = False
 
+    api_key_pepper: SecretStr
+
     @property
     def postgres_dsn(self) -> PostgresDsn:
         return PostgresDsn.build(
@@ -40,6 +42,10 @@ class Settings(BaseSettings):
             port=self.redis_port,
             path=str(self.redis_db),
         )
+
+    @property
+    def api_key_pepper_value(self) -> str:
+        return self.api_key_pepper.get_secret_value()
 
 
 settings = Settings()  # pyright: ignore[reportCallIssue]
