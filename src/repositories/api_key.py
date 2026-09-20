@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from src.core.config import settings
 from src.database.session import get_local_session
@@ -31,3 +31,11 @@ class APIKeyRepository:
         self.session.commit()
         self.session.refresh(api_key)
         return api_key
+
+    async def get_by_key_id(self, *, key_id: str) -> APIKey | None:
+        return (
+            self.session.query(APIKey)
+            .filter_by(key_id=key_id, deleted_at=None)
+            .options(selectinload(APIKey.owner))
+            .first()
+        )

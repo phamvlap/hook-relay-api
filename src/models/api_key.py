@@ -18,6 +18,10 @@ class APIKeyEnvironment(StrEnum):
     TEST = "test"
     LIVE = "live"
 
+    @classmethod
+    def values(cls) -> tuple[str, ...]:
+        return tuple(member.value for member in cls)
+
 
 class APIKey(BaseModel):
     __tablename__ = "api_keys"

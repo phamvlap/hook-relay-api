@@ -3,9 +3,10 @@ import hmac
 import secrets
 
 from src.core.config import settings
+from src.exceptions.api_key import InvalidAPIKeyFormatError
 from src.models.api_key import APIKeyEnvironment
 from src.repositories.api_key import APIKeyRepository
-from src.schemas.api_key import APIKeyCreateResponse
+from src.schemas.api_key import APIKeyCreateResponse, APIKeyResponse
 
 _KEY_PREFIX = "hr"
 
@@ -58,3 +59,24 @@ class APIKeyService:
             revoked_at=api_key.revoked_at,
             api_key=constructed_api_key,
         )
+
+    def parse_api_key(self, raw_key: str) -> tuple[str, str]:
+        parts = raw_key.strip().split("_", 3)
+
+        if len(parts) != 4 or parts[0] != _KEY_PREFIX or parts[1] not in APIKeyEnvironment.values():
+            raise InvalidAPIKeyFormatError("Malformed API key format")
+
+        _, _, key_id, secret_key = parts
+
+        return key_id, secret_key
+
+    def verify(self, secret_key: str, expected_hash: str) -> bool:
+        computed_hash = self._hash_secret(secret_key)
+        return hmac.compare_digest(computed_hash, expected_hash)
+
+    async def get_by_key_id(self, *, key_id: str) -> APIKeyResponse | None:
+        api_key = await self.api_key_repository.get_by_key_id(key_id=key_id)
+        if api_key is None:
+            return None
+
+        return APIKeyResponse.model_validate(api_key)

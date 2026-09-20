@@ -5,7 +5,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.core.exceptions import AppError, ConflictError, NotFoundError, ValidationError
+from src.core.exceptions import (
+    AppError,
+    ConflictError,
+    NotFoundError,
+    UnauthorizedError,
+    ValidationError,
+)
 
 
 def _error_response(status_code: int, message: str, details: dict[str, Any] | None = None):
@@ -31,6 +37,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error_exception_handler(request: Request, exc: AppError):
         return _error_response(status.HTTP_400_BAD_REQUEST, exc.message)
+
+    @app.exception_handler(UnauthorizedError)
+    async def unauthorized_exception_handler(request: Request, exc: UnauthorizedError):
+        return _error_response(status.HTTP_401_UNAUTHORIZED, exc.message)
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
