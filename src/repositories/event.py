@@ -1,53 +1,75 @@
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.core.config import settings
-from src.database.session import get_local_session
-from src.models.event import WebhookEvent, resolve_event_status
+from src.models.delivery import WebhookDelivery
+from src.models.event import WebhookEvent, WebhookEventStatus, resolve_event_status
 
 
 class EventRepository:
-    def __init__(self, session: Session | None = None):
-        if session is None:
-            session = get_local_session(settings.postgres_dsn_str)
+    def __init__(self, session: Session) -> None:
         self.session = session
 
-    async def create(self, *, event_type: str, payload: dict[str, Any]) -> WebhookEvent:
-        event = WebhookEvent(event_type=event_type, payload=payload)
+    async def create(
+        self,
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+        owner_id: str | UUID,
+    ) -> WebhookEvent:
+        event = WebhookEvent(event_type=event_type, payload=payload, owner_id=owner_id)
         self.session.add(event)
-        self.session.commit()
-        self.session.refresh(event)
+        self.session.flush()
         return event
 
-    async def get_by_id(self, *, id: str) -> WebhookEvent | None:
-        return self.session.query(WebhookEvent).filter_by(id=id, deleted_at=None).first()
+    async def get_by_id(self, *, id: str | UUID, owner_id: str | UUID) -> WebhookEvent | None:
+        stmt = select(WebhookEvent).where(
+            WebhookEvent.id == id,
+            WebhookEvent.owner_id == owner_id,
+            WebhookEvent.deleted_at.is_(None),
+        )
+        return self.session.scalars(stmt).first()
 
-    async def count(self) -> int:
-        return self.session.query(WebhookEvent).filter_by(deleted_at=None).count()
+    async def count(self, *, owner_id: str | UUID, status: WebhookEventStatus | None = None) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(WebhookEvent)
+            .where(
+                WebhookEvent.owner_id == owner_id,
+                WebhookEvent.deleted_at.is_(None),
+            )
+        )
+        if status is not None:
+            stmt = stmt.where(WebhookEvent.status == status)
+        return self.session.scalar(stmt) or 0
 
     async def list(
         self,
         *,
+        owner_id: str | UUID,
         offset: int | None = None,
         limit: int | None = None,
-        status: str | None = None,
+        status: WebhookEventStatus | None = None,
     ) -> list[WebhookEvent]:
-        query = self.session.query(WebhookEvent).filter_by(deleted_at=None)
+        stmt = select(WebhookEvent).where(
+            WebhookEvent.owner_id == owner_id,
+            WebhookEvent.deleted_at.is_(None),
+        )
 
         if status is not None:
-            query = query.filter_by(status=status)
+            stmt = stmt.where(WebhookEvent.status == status)
 
-        query = query.order_by(WebhookEvent.created_at.desc())
+        stmt = stmt.order_by(WebhookEvent.created_at.desc())
 
         if offset is not None:
-            query = query.offset(offset)
+            stmt = stmt.offset(offset)
 
         if limit is not None:
-            query = query.limit(limit)
+            stmt = stmt.limit(limit)
 
-        return query.all()
+        return list(self.session.scalars(stmt).all())
 
     async def update(
         self,
@@ -59,34 +81,34 @@ class EventRepository:
             setattr(event, key, value)
 
         self.session.flush()
-        self.session.commit()
-        self.session.refresh(event)
         return event
 
     async def resolve_and_update_status(self, *, event_id: str) -> WebhookEvent | None:
-        try:
-            event = (
-                self.session.query(WebhookEvent)
-                .filter_by(id=event_id, deleted_at=None)
-                .with_for_update()
-                .first()
+        stmt = (
+            select(WebhookEvent)
+            .where(
+                WebhookEvent.id == event_id,
+                WebhookEvent.deleted_at.is_(None),
             )
+            .with_for_update()
+        )
+        event = self.session.scalars(stmt).first()
 
-            if not event:
-                self.session.rollback()
-                return None
-
-            delivery_statuses = [delivery.status for delivery in event.deliveries]
-            resolved_status = resolve_event_status(delivery_statuses)
-
-            if event.status != resolved_status:
-                event.status = resolved_status
-                self.session.flush()
-
-            self.session.commit()
-            self.session.refresh(event)
-            return event
-
-        except SQLAlchemyError:
-            self.session.rollback()
+        if not event:
             return None
+
+        delivery_status_stmt = select(WebhookDelivery.status).where(
+            WebhookDelivery.event_id == event_id
+        )
+        delivery_statuses = list(self.session.scalars(delivery_status_stmt).all())
+
+        if not delivery_statuses:
+            return None
+
+        resolved_status = resolve_event_status(delivery_statuses)
+
+        if event.status != resolved_status:
+            event.status = resolved_status
+            self.session.flush()
+
+        return event

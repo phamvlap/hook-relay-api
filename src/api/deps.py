@@ -4,9 +4,8 @@ from typing import Annotated
 from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
-from src.core.config import settings
 from src.core.pagination import PageNumberPaginationParams
-from src.database.session import get_local_session
+from src.database.session import LocalSession
 from src.repositories.delivery import DeliveryRepository
 from src.repositories.endpoint import EndpointRepository
 from src.repositories.event import EventRepository
@@ -16,11 +15,14 @@ from src.services.event import EventService
 
 
 def get_db() -> Generator[Session]:
-    db: Session = get_local_session(settings.postgres_dsn_str)
+    session: Session = LocalSession()
     try:
-        yield db
+        yield session
+    except Exception:
+        session.rollback()
+        raise
     finally:
-        db.close()
+        session.close()
 
 
 SessionDep = Annotated[Session, Depends(get_db)]
@@ -39,23 +41,34 @@ def get_event_repository(session: SessionDep) -> EventRepository:
 
 
 def get_endpoint_service(
+    session: SessionDep,
     endpoint_repository: Annotated[EndpointRepository, Depends(get_endpoint_repository)],
 ) -> EndpointService:
-    return EndpointService(endpoint_repository=endpoint_repository)
+    return EndpointService(endpoint_repository=endpoint_repository, session=session)
 
 
 def get_delivery_service(
+    session: SessionDep,
+    event_repository: Annotated[EventRepository, Depends(get_event_repository)],
+    endpoint_repository: Annotated[EndpointRepository, Depends(get_endpoint_repository)],
     delivery_repository: Annotated[DeliveryRepository, Depends(get_delivery_repository)],
 ) -> DeliveryService:
-    return DeliveryService(delivery_repository=delivery_repository)
+    return DeliveryService(
+        session=session,
+        event_repository=event_repository,
+        endpoint_repository=endpoint_repository,
+        delivery_repository=delivery_repository,
+    )
 
 
 def get_event_service(
+    session: SessionDep,
     event_repository: Annotated[EventRepository, Depends(get_event_repository)],
     endpoint_repository: Annotated[EndpointRepository, Depends(get_endpoint_repository)],
     delivery_repository: Annotated[DeliveryRepository, Depends(get_delivery_repository)],
 ) -> EventService:
     return EventService(
+        session=session,
         event_repository=event_repository,
         endpoint_repository=endpoint_repository,
         delivery_repository=delivery_repository,

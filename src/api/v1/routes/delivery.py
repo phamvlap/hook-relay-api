@@ -1,9 +1,11 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 
 from src.api.deps import get_delivery_service, get_page_number_pagination_params
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
+from src.core.security import AuthContext, get_auth_context_from_api_key
 from src.models.delivery import WebhookDeliveryStatus
 from src.schemas.delivery import DeliveryListResponse, DeliveryRetrieveResponse
 from src.services.delivery import DeliveryService
@@ -16,6 +18,7 @@ async def get_deliveries(
     request: Request,
     page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
     delivery_service: Annotated[DeliveryService, Depends(get_delivery_service)],
+    auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
     event_id: str | None = None,
     endpoint_id: str | None = None,
     status: WebhookDeliveryStatus | None = None,
@@ -24,6 +27,7 @@ async def get_deliveries(
     Get all deliveries.
     """
     return await delivery_service.list(
+        owner_id=auth.owner_id,
         request=request,
         page_params=page_params,
         event_id=event_id,
@@ -34,10 +38,11 @@ async def get_deliveries(
 
 @router.get("/{delivery_id}", response_model=DeliveryRetrieveResponse)
 async def get_delivery(
-    delivery_id: str,
+    delivery_id: UUID,
     delivery_service: Annotated[DeliveryService, Depends(get_delivery_service)],
+    auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
 ) -> DeliveryRetrieveResponse:
     """
     Get a delivery by ID.
     """
-    return await delivery_service.retrieve(delivery_id=delivery_id)
+    return await delivery_service.retrieve(delivery_id=delivery_id, owner_id=auth.owner_id)

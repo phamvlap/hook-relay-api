@@ -1,14 +1,18 @@
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
+from uuid import UUID
 
 import httpx
 from celery import Task
 from fastapi import Request
+from sqlalchemy.orm import Session
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.exceptions.delivery import DeliveryNotFoundError
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
+from src.models.endpoint import WebhookEndpoint
+from src.models.event import WebhookEvent
 from src.repositories.delivery import DeliveryRepository
 from src.repositories.endpoint import EndpointRepository
 from src.repositories.event import EventRepository
@@ -27,29 +31,34 @@ def _create_httpx_client() -> httpx.AsyncClient:
 class DeliveryService:
     def __init__(
         self,
-        delivery_repository: DeliveryRepository | None = None,
-        event_repository: EventRepository | None = None,
-        endpoint_repository: EndpointRepository | None = None,
+        delivery_repository: DeliveryRepository,
+        event_repository: EventRepository,
+        endpoint_repository: EndpointRepository,
+        session: Session,
+        httpx_client: httpx.AsyncClient | None = None,
     ):
-        self.delivery_repository = delivery_repository or DeliveryRepository()
-        self.event_repository = event_repository or EventRepository()
-        self.endpoint_repository = endpoint_repository or EndpointRepository()
+        self.delivery_repository = delivery_repository
+        self.event_repository = event_repository
+        self.endpoint_repository = endpoint_repository
+        self.session = session
+        self.httpx_client = httpx_client or httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0, read=10.0, write=10.0, pool=None),
+            follow_redirects=False,
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        )
 
-    async def deliver(self, delivery_id: str) -> None:
-        delivery = await self.delivery_repository.get_by_id(id=delivery_id)
-        if not delivery:
+    async def deliver(self, *, delivery_id: str | UUID) -> None:
+        delivery = await self.delivery_repository.get_delivery_for_processing(
+            delivery_id=delivery_id,
+        )
+        if not delivery or not delivery.endpoint or not delivery.event:
             return
 
-        if delivery.status in [WebhookDeliveryStatus.SUCCESS, WebhookDeliveryStatus.DEAD_LETTER]:
-            return
-
-        event = await self.event_repository.get_by_id(id=str(delivery.event_id))
-        endpoint = await self.endpoint_repository.get_by_id(id=str(delivery.endpoint_id))
-
-        if not event or not endpoint:
-            return
+        endpoint: WebhookEndpoint = delivery.endpoint
+        event: WebhookEvent = delivery.event
 
         await self.delivery_repository.mark_as_delivering(delivery=delivery)
+        self.session.commit()
         await self._sync_event_status(event_id=str(event.id))
 
         payload = {
@@ -60,6 +69,7 @@ class DeliveryService:
         }
         headers = {
             "Content-Type": "application/json",
+            "User-Agent": "HookRelay/1.0",
             "X-Webhook-ID": str(event.id),
             "X-Webhook-Event-Type": event.event_type,
             "X-Webhook-Timestamp": event.created_at.isoformat(),
@@ -68,7 +78,7 @@ class DeliveryService:
         start_time = time.monotonic()
 
         try:
-            async with _create_httpx_client() as client:
+            async with self.httpx_client as client:
                 response = await client.post(
                     endpoint.url,
                     json=payload,
@@ -77,6 +87,33 @@ class DeliveryService:
 
             duration_ms = int((time.monotonic() - start_time) * 1000)
 
+            if self._is_successful_status(response.status_code):
+                await self.delivery_repository.mark_as_success(
+                    delivery=delivery,
+                    status_code=response.status_code,
+                    response_body=self._get_response_body(response),
+                    duration_ms=duration_ms,
+                )
+
+            elif self._should_retry(response.status_code):
+                await self._process_retry_or_failure(
+                    delivery=delivery,
+                    error_message=f"HTTP {response.status_code}",
+                    should_retry=True,
+                    max_retries=endpoint.max_retries,
+                    duration_ms=duration_ms,
+                    status_code=response.status_code,
+                )
+
+            else:
+                await self.delivery_repository.mark_as_failed(
+                    delivery=delivery,
+                    status_code=response.status_code,
+                    response_body=self._get_response_body(response),
+                    error_message=f"Received status code {response.status_code}",
+                    duration_ms=duration_ms,
+                )
+
         except httpx.InvalidURL as exc:
             await self.delivery_repository.mark_as_failed(
                 delivery=delivery,
@@ -84,7 +121,6 @@ class DeliveryService:
                 error_message=str(exc),
                 duration_ms=int((time.monotonic() - start_time) * 1000),
             )
-            return
 
         except httpx.TimeoutException as exc:
             await self._process_retry_or_failure(
@@ -94,7 +130,6 @@ class DeliveryService:
                 max_retries=endpoint.max_retries,
                 duration_ms=int((time.monotonic() - start_time) * 1000),
             )
-            return
 
         except httpx.RequestError as exc:
             await self._process_retry_or_failure(
@@ -104,42 +139,16 @@ class DeliveryService:
                 max_retries=endpoint.max_retries,
                 duration_ms=int((time.monotonic() - start_time) * 1000),
             )
-            return
 
-        if self._is_successful_status(response.status_code):
-            await self.delivery_repository.mark_as_success(
-                delivery=delivery,
-                status_code=response.status_code,
-                response_body=self._get_response_body(response),
-                duration_ms=duration_ms,
-            )
-            return
-
-        if self._should_retry(response.status_code):
-            await self._process_retry_or_failure(
-                delivery=delivery,
-                error_message=f"Received status code {response.status_code}",
-                should_retry=True,
-                max_retries=endpoint.max_retries,
-                duration_ms=duration_ms,
-                status_code=response.status_code,
-            )
-            return
-
-        await self.delivery_repository.mark_as_failed(
-            delivery=delivery,
-            status_code=response.status_code,
-            response_body=self._get_response_body(response),
-            error_message=f"Received status code {response.status_code}",
-            duration_ms=duration_ms,
-        )
-        await self._sync_event_status(event_id=str(event.id))
+        finally:
+            self.session.commit()
+            await self._sync_event_status(event_id=str(event.id))
 
     def _is_successful_status(self, status_code: int) -> bool:
         return 200 <= status_code < 300
 
     def _should_retry(self, status_code: int) -> bool:
-        return status_code == 408 or status_code == 429 or (500 <= status_code < 600)
+        return status_code in (408, 429) or (500 <= status_code < 600)
 
     def _get_response_body(self, response: httpx.Response) -> dict[str, Any] | None:
         try:
@@ -149,6 +158,7 @@ class DeliveryService:
 
     async def _sync_event_status(self, event_id: str) -> None:
         await self.event_repository.resolve_and_update_status(event_id=event_id)
+        self.session.commit()
 
     async def _process_retry_or_failure(
         self,
@@ -169,7 +179,6 @@ class DeliveryService:
                 error_message=error_message,
                 duration_ms=duration_ms,
             )
-            await self._sync_event_status(event_id=str(delivery.event_id))
             return
 
         if attempt >= max_retries:
@@ -180,7 +189,6 @@ class DeliveryService:
                 error_message=error_message,
                 duration_ms=duration_ms,
             )
-            await self._sync_event_status(event_id=str(delivery.event_id))
             return
 
         retry_delay = self._compute_retry_delay(attempt)
@@ -192,7 +200,6 @@ class DeliveryService:
             duration_ms=duration_ms,
             next_retry_at=self._compute_next_retry_time(retry_delay),
         )
-        await self._sync_event_status(event_id=str(delivery.event_id))
 
         task = cast(Task, deliver_webhook_task)
         task.apply_async(args=[str(delivery.id)], countdown=retry_delay)
@@ -209,12 +216,14 @@ class DeliveryService:
         self,
         *,
         request: Request,
-        event_id: str,
+        event_id: str | UUID,
+        owner_id: str | UUID,
         page_params: PageNumberPaginationParams,
     ) -> PageNumberPaginationResponse[DeliveryListInEvent]:
-        total_count = await self.delivery_repository.count(event_id=event_id)
+        total_count = await self.delivery_repository.count(event_id=event_id, owner_id=owner_id)
         items = await self.delivery_repository.list(
             event_id=event_id,
+            owner_id=owner_id,
             offset=page_params.offset,
             limit=page_params.limit,
         )
@@ -230,18 +239,21 @@ class DeliveryService:
     async def list(
         self,
         *,
+        owner_id: str | UUID,
         request: Request,
         page_params: PageNumberPaginationParams,
         event_id: str | None = None,
         endpoint_id: str | None = None,
         status: WebhookDeliveryStatus | None = None,
     ) -> PageNumberPaginationResponse[DeliveryListResponse]:
-        total_count = await self.delivery_repository.count(
+        total = await self.delivery_repository.count(
+            owner_id=owner_id,
             event_id=event_id,
             endpoint_id=endpoint_id,
             status=status,
         )
         items = await self.delivery_repository.list(
+            owner_id=owner_id,
             event_id=event_id,
             endpoint_id=endpoint_id,
             offset=page_params.offset,
@@ -251,14 +263,19 @@ class DeliveryService:
 
         return PageNumberPaginationResponse.build(
             request=request,
-            total=total_count,
+            total=total,
             page=page_params.page,
             page_size=page_params.page_size,
             items=[DeliveryListResponse.model_validate(item) for item in items],
         )
 
-    async def retrieve(self, *, delivery_id: str) -> DeliveryRetrieveResponse:
-        delivery = await self.delivery_repository.get_by_id(id=delivery_id)
+    async def retrieve(
+        self,
+        *,
+        delivery_id: str | UUID,
+        owner_id: str | UUID,
+    ) -> DeliveryRetrieveResponse:
+        delivery = await self.delivery_repository.get_by_id(id=delivery_id, owner_id=owner_id)
         if not delivery:
             raise DeliveryNotFoundError()
 

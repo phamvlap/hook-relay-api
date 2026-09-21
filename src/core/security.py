@@ -5,8 +5,10 @@ from fastapi import BackgroundTasks, Depends, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.core.exceptions import UnauthorizedError
+from src.database.session import get_local_session
 from src.exceptions.api_key import InvalidAPIKeyFormatError
 from src.models.api_key import APIKeyEnvironment, APIKeyStatus
+from src.repositories.api_key import APIKeyRepository
 from src.services.api_key import APIKeyService
 
 bearer_scheme = HTTPBearer(
@@ -19,7 +21,7 @@ bearer_credentials = Depends(bearer_scheme)
 @dataclass(frozen=True)
 class AuthContext:
     api_key_id: UUID
-    owner_id: UUID
+    owner_id: UUID | str
     key_id: str
     environment: APIKeyEnvironment
 
@@ -33,7 +35,11 @@ async def get_auth_context_from_api_key(
     if credentials is None or not credentials.credentials:
         raise UnauthorizedError("Missing or invalid API key.")
 
-    api_key_service = APIKeyService()
+    session = get_local_session()
+    api_key_service = APIKeyService(
+        api_key_repository=APIKeyRepository(session=session),
+        session=session,
+    )
     try:
         # Parse the API key to extract its components
         key_id, secret_key = api_key_service.parse_api_key(credentials.credentials)
@@ -57,5 +63,5 @@ async def get_auth_context_from_api_key(
         key_id=api_key.key_id,
         environment=api_key.environment,
     )
-    request.auth.auth = ctx
+    request.state.auth = ctx
     return ctx

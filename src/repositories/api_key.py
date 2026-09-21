@@ -1,20 +1,19 @@
-from sqlalchemy.orm import Session, selectinload
+from uuid import UUID
 
-from src.core.config import settings
-from src.database.session import get_local_session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload
+
 from src.models.api_key import APIKey, APIKeyEnvironment
 
 
 class APIKeyRepository:
-    def __init__(self, session: Session | None = None):
-        if session is None:
-            session = get_local_session(settings.postgres_dsn_str)
+    def __init__(self, session: Session) -> None:
         self.session = session
 
     async def create(
         self,
         *,
-        owner_id: str,
+        owner_id: str | UUID,
         name: str,
         key_id: str,
         key_hash: str,
@@ -28,14 +27,16 @@ class APIKeyRepository:
             environment=environment,
         )
         self.session.add(api_key)
-        self.session.commit()
-        self.session.refresh(api_key)
+        self.session.flush()
         return api_key
 
     async def get_by_key_id(self, *, key_id: str) -> APIKey | None:
-        return (
-            self.session.query(APIKey)
-            .filter_by(key_id=key_id, deleted_at=None)
-            .options(selectinload(APIKey.owner))
-            .first()
+        stmt = (
+            select(APIKey)
+            .where(
+                APIKey.key_id == key_id,
+                APIKey.deleted_at.is_(None),
+            )
+            .options(joinedload(APIKey.owner))
         )
+        return self.session.scalars(stmt).first()

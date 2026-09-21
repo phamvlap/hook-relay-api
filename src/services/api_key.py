@@ -1,6 +1,10 @@
 import hashlib
 import hmac
 import secrets
+from uuid import UUID
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.exceptions.api_key import InvalidAPIKeyFormatError
@@ -12,8 +16,9 @@ _KEY_PREFIX = "hr"
 
 
 class APIKeyService:
-    def __init__(self, *, api_key_repository: APIKeyRepository | None = None):
-        self.api_key_repository = api_key_repository or APIKeyRepository()
+    def __init__(self, *, api_key_repository: APIKeyRepository, session: Session) -> None:
+        self.api_key_repository = api_key_repository
+        self.session = session
 
     def _pepper(self) -> bytes:
         return settings.api_key_pepper_value.encode()
@@ -28,7 +33,7 @@ class APIKeyService:
     async def create(
         self,
         *,
-        owner_id: str,
+        owner_id: str | UUID,
         name: str,
         environment: APIKeyEnvironment = APIKeyEnvironment.TEST,
     ) -> APIKeyCreateResponse:
@@ -39,26 +44,37 @@ class APIKeyService:
 
         constructed_api_key = f"{_KEY_PREFIX}_{environment.value}_{key_id}_{secret_key}"
 
-        # Store the API key in the database
-        api_key = await self.api_key_repository.create(
-            owner_id=owner_id,
-            name=name,
-            key_id=key_id,
-            key_hash=key_hash,
-            environment=environment,
-        )
+        try:
+            with self.session.begin_nested():
+                # Store the API key in the database
+                api_key = await self.api_key_repository.create(
+                    owner_id=owner_id,
+                    name=name,
+                    key_id=key_id,
+                    key_hash=key_hash,
+                    environment=environment,
+                )
 
-        return APIKeyCreateResponse(
-            id=api_key.id,
-            owner_id=api_key.owner_id,
-            name=api_key.name,
-            key_id=api_key.key_id,
-            status=api_key.status,
-            environment=api_key.environment,
-            last_used_at=api_key.last_used_at,
-            revoked_at=api_key.revoked_at,
-            api_key=constructed_api_key,
-        )
+            self.session.commit()
+            return APIKeyCreateResponse(
+                id=api_key.id,
+                owner_id=api_key.owner_id,
+                name=api_key.name,
+                key_id=api_key.key_id,
+                status=api_key.status,
+                environment=api_key.environment,
+                last_used_at=api_key.last_used_at,
+                revoked_at=api_key.revoked_at,
+                api_key=constructed_api_key,
+            )
+
+        except IntegrityError:
+            self.session.rollback()
+            raise
+
+        except Exception:
+            self.session.rollback()
+            raise
 
     def parse_api_key(self, raw_key: str) -> tuple[str, str]:
         parts = raw_key.strip().split("_", 3)
