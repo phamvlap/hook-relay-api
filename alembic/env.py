@@ -29,7 +29,7 @@ target_metadata = Base.metadata
 
 
 def _get_url() -> str:
-    return str(settings.postgres_dsn)
+    return settings.postgres_dsn_str
 
 
 def run_migrations_offline() -> None:

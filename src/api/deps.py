@@ -16,7 +16,7 @@ from src.services.event import EventService
 
 
 def get_db() -> Generator[Session]:
-    db: Session = get_local_session(str(settings.postgres_dsn))
+    db: Session = get_local_session(settings.postgres_dsn_str)
     try:
         yield db
     finally:

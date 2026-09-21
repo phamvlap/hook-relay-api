@@ -8,7 +8,7 @@ from src.models.api_key import APIKey, APIKeyEnvironment
 class APIKeyRepository:
     def __init__(self, session: Session | None = None):
         if session is None:
-            session = get_local_session(str(settings.postgres_dsn))
+            session = get_local_session(settings.postgres_dsn_str)
         self.session = session
 
     async def create(

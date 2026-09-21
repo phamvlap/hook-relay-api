@@ -12,7 +12,7 @@ from src.tasks.celery_app import celery_app
 def deliver_webhook_task(delivery_id: str) -> None:
     from src.services.delivery import DeliveryService
 
-    session = get_local_session(str(settings.postgres_dsn))
+    session = get_local_session(settings.postgres_dsn_str)
 
     try:
         delivery_service = DeliveryService(

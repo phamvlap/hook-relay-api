@@ -4,8 +4,8 @@ from src.core.config import settings
 
 celery_app = Celery(
     "hook_relay",
-    broker=str(settings.redis_dsn),
-    backend=str(settings.redis_dsn),
+    broker=settings.redis_dsn_str,
+    backend=settings.redis_dsn_str,
 )
 
 celery_app.conf.update(
