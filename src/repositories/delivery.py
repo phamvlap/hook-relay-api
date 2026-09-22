@@ -3,7 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
 
@@ -232,8 +232,8 @@ class DeliveryRepository:
                 ),
             )
             .options(
-                joinedload(WebhookDelivery.endpoint),
-                joinedload(WebhookDelivery.event),
+                selectinload(WebhookDelivery.endpoint),
+                selectinload(WebhookDelivery.event),
             )
             .with_for_update()
         )
