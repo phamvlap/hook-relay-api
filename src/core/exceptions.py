@@ -30,5 +30,5 @@ class ValidationError(AppError):
 class UnauthorizedError(AppError):
     """Exception raised for unauthorized access."""
 
-    def __init__(self, message: str = "Unauthorized access"):
+    def __init__(self, message: str = "Invalid authentication credentials"):
         super().__init__(message)
