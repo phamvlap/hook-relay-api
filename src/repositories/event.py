@@ -97,15 +97,16 @@ class EventRepository:
         if not event:
             return None
 
-        delivery_status_stmt = select(WebhookDelivery.status).where(
-            WebhookDelivery.event_id == event_id
+        delivery_status_stmt = (
+            select(WebhookDelivery.status, func.count())
+            .where(WebhookDelivery.event_id == event_id)
+            .group_by(WebhookDelivery.status)
         )
-        delivery_statuses = list(self.session.scalars(delivery_status_stmt).all())
+        delivery_status_counts = {
+            row[0]: row[1] for row in self.session.execute(delivery_status_stmt).all()
+        }
 
-        if not delivery_statuses:
-            return None
-
-        resolved_status = resolve_event_status(delivery_statuses)
+        resolved_status = resolve_event_status(delivery_status_counts)
 
         if event.status != resolved_status:
             event.status = resolved_status

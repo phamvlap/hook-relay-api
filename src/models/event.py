@@ -1,4 +1,3 @@
-from collections import Counter
 from typing import Any
 from uuid import UUID
 
@@ -45,32 +44,30 @@ class WebhookEvent(BaseModel):
     owner = relationship("Owner", back_populates="events")
 
 
-def resolve_event_status(delivery_statuses: list[WebhookDeliveryStatus]) -> WebhookEventStatus:
+def resolve_event_status(
+    delivery_status_counts: dict[WebhookDeliveryStatus, int],
+) -> WebhookEventStatus:
     """
     Resolve the status of a webhook event based on the statuses of its deliveries.
 
     Args:
-        delivery_statuses (list[WebhookDeliveryStatus]): A list of delivery statuses.
+        delivery_status_counts (dict[WebhookDeliveryStatus, int]): A dictionary mapping delivery statuses to their counts.
 
     Returns:
         WebhookEventStatus: The resolved status of the webhook event.
     """
-    if not delivery_statuses:
+    total = sum(delivery_status_counts.values())
+    if total == 0:
         return WebhookEventStatus.COMPLETED
 
-    status_counts = Counter(delivery_statuses)
-    total = len(delivery_statuses)
-
-    success_count = status_counts[WebhookDeliveryStatus.SUCCESS]
-    failure_count = (
-        status_counts[WebhookDeliveryStatus.FAILED]
-        + status_counts[WebhookDeliveryStatus.DEAD_LETTER]
-    )
-    in_progress_count = (
-        status_counts[WebhookDeliveryStatus.DELIVERING]
-        + status_counts[WebhookDeliveryStatus.RETRYING]
-    )
-    queued_count = status_counts[WebhookDeliveryStatus.QUEUED]
+    queued_count = delivery_status_counts.get(WebhookDeliveryStatus.QUEUED, 0)
+    success_count = delivery_status_counts.get(WebhookDeliveryStatus.SUCCESS, 0)
+    failure_count = delivery_status_counts.get(
+        WebhookDeliveryStatus.FAILED, 0
+    ) + delivery_status_counts.get(WebhookDeliveryStatus.DEAD_LETTER, 0)
+    in_progress_count = delivery_status_counts.get(
+        WebhookDeliveryStatus.DELIVERING, 0
+    ) + delivery_status_counts.get(WebhookDeliveryStatus.RETRYING, 0)
 
     if queued_count == total:
         return WebhookEventStatus.QUEUED
