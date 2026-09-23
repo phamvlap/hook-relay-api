@@ -6,10 +6,13 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from src.api.deps import get_endpoint_service, get_page_number_pagination_params
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.core.security import AuthContext, get_auth_context_from_api_key
+from src.models.endpoint import WebhookEndpointStatus
 from src.schemas.endpoint import (
     EndpointCreateRequest,
     EndpointCreateResponse,
     EndpointListResponse,
+    EndpointPauseResponse,
+    EndpointResumeResponse,
     EndpointRetrieveResponse,
     EndpointUpdateRequest,
     EndpointUpdateResponse,
@@ -25,6 +28,7 @@ async def get_endpoints(
     page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    status: WebhookEndpointStatus | None = None,
 ) -> PageNumberPaginationResponse[EndpointListResponse]:
     """
     Get all endpoints.
@@ -33,6 +37,7 @@ async def get_endpoints(
         request=request,
         page_params=page_params,
         owner_id=auth.owner_id,
+        status=status,
     )
 
 
@@ -84,3 +89,27 @@ async def delete_endpoint(
     """
     await endpoint_service.delete(endpoint_id=endpoint_id, owner_id=auth.owner_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/{endpoint_id}/pause", response_model=EndpointPauseResponse)
+async def pause_endpoint(
+    endpoint_id: UUID,
+    endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
+    auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+) -> EndpointPauseResponse:
+    """
+    Pause an endpoint by ID.
+    """
+    return await endpoint_service.pause(endpoint_id=endpoint_id, owner_id=auth.owner_id)
+
+
+@router.patch("/{endpoint_id}/resume", response_model=EndpointResumeResponse)
+async def resume_endpoint(
+    endpoint_id: UUID,
+    endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
+    auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+) -> EndpointResumeResponse:
+    """
+    Resume an endpoint by ID.
+    """
+    return await endpoint_service.resume(endpoint_id=endpoint_id, owner_id=auth.owner_id)

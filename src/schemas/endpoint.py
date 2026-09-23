@@ -60,3 +60,11 @@ class EndpointUpdateResponse(BaseModel):
     status: WebhookEndpointStatus
     max_retries: int
     created_at: datetime
+
+
+class EndpointPauseResponse(BaseModel):
+    success: bool
+
+
+class EndpointResumeResponse(BaseModel):
+    success: bool

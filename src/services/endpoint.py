@@ -19,6 +19,8 @@ from src.schemas.endpoint import (
     EndpointCreateRequest,
     EndpointCreateResponse,
     EndpointListResponse,
+    EndpointPauseResponse,
+    EndpointResumeResponse,
     EndpointRetrieveResponse,
     EndpointUpdateRequest,
     EndpointUpdateResponse,
@@ -142,6 +144,54 @@ class EndpointService:
 
         await self.endpoint_repository.soft_delete(endpoint=endpoint)
         self.session.commit()
+
+    async def pause(
+        self,
+        *,
+        endpoint_id: str | UUID,
+        owner_id: str | UUID,
+    ) -> EndpointPauseResponse:
+        endpoint = await self.endpoint_repository.get_by_id(id=endpoint_id, owner_id=owner_id)
+        if not endpoint:
+            raise EndpointNotFoundError()
+
+        try:
+            with self.session.begin_nested():
+                await self.endpoint_repository.update(
+                    endpoint=endpoint,
+                    data={"status": WebhookEndpointStatus.PAUSED},
+                )
+
+            self.session.commit()
+            return EndpointPauseResponse(success=True)
+
+        except Exception:
+            self.session.rollback()
+            raise
+
+    async def resume(
+        self,
+        *,
+        endpoint_id: str | UUID,
+        owner_id: str | UUID,
+    ) -> EndpointResumeResponse:
+        endpoint = await self.endpoint_repository.get_by_id(id=endpoint_id, owner_id=owner_id)
+        if not endpoint:
+            raise EndpointNotFoundError()
+
+        try:
+            with self.session.begin_nested():
+                await self.endpoint_repository.update(
+                    endpoint=endpoint,
+                    data={"status": WebhookEndpointStatus.ACTIVE},
+                )
+
+            self.session.commit()
+            return EndpointResumeResponse(success=True)
+
+        except Exception:
+            self.session.rollback()
+            raise
 
 
 def validate_safe_webhook_url(url: str) -> None:
