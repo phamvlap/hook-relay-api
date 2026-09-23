@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy import Enum as SQLEnum
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.enum import BaseStrEnum
@@ -38,3 +38,7 @@ class WebhookEndpoint(BaseModel):
         cascade="all, delete-orphan",
     )
     owner = relationship("Owner", back_populates="endpoints")
+
+    __table_args__ = (
+        UniqueConstraint("owner_id", "url", name="uq_webhook_endpoints_owner_id_url"),
+    )

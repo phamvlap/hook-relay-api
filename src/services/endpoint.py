@@ -1,3 +1,6 @@
+import ipaddress
+import socket
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import Request
@@ -5,7 +8,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
-from src.exceptions.endpoint import EndpointNotFoundError, EndpointValidationError
+from src.exceptions.endpoint import (
+    EndpointConflictError,
+    EndpointNotFoundError,
+    EndpointValidationError,
+)
+from src.models.endpoint import WebhookEndpointStatus
 from src.repositories.endpoint import EndpointRepository
 from src.schemas.endpoint import (
     EndpointCreateRequest,
@@ -15,7 +23,6 @@ from src.schemas.endpoint import (
     EndpointUpdateRequest,
     EndpointUpdateResponse,
 )
-from src.utils.endpoint import validate_url
 
 
 class EndpointService:
@@ -31,9 +38,8 @@ class EndpointService:
     ) -> EndpointCreateResponse:
         url = str(data.url)
 
-        is_valid_url = validate_url(url)
-        if not is_valid_url:
-            raise EndpointValidationError("Invalid URL provided.")
+        # Validate the URL format and safety
+        validate_safe_webhook_url(url)
 
         try:
             with self.session.begin_nested():
@@ -49,7 +55,7 @@ class EndpointService:
 
         except IntegrityError:
             self.session.rollback()
-            raise
+            raise EndpointConflictError("An endpoint with the same URL already exists.")
 
         except Exception:
             self.session.rollback()
@@ -73,13 +79,16 @@ class EndpointService:
         owner_id: str | UUID,
         request: Request,
         page_params: PageNumberPaginationParams,
+        status: WebhookEndpointStatus | None = None,
     ) -> PageNumberPaginationResponse[EndpointListResponse]:
-        total = await self.endpoint_repository.count(owner_id=owner_id)
+        total = await self.endpoint_repository.count(owner_id=owner_id, status=status)
         endpoints = await self.endpoint_repository.list(
             owner_id=owner_id,
             offset=page_params.offset,
             limit=page_params.limit,
+            status=status,
         )
+
         return PageNumberPaginationResponse.build(
             request=request,
             total=total,
@@ -102,9 +111,10 @@ class EndpointService:
         update_data = data.model_dump(exclude_unset=True)
         if "url" in update_data and update_data["url"] is not None:
             url = str(update_data["url"])
-            is_valid_url = validate_url(url)
-            if not is_valid_url:
-                raise EndpointValidationError("Invalid URL provided.")
+
+            # Validate the URL format and safety
+            validate_safe_webhook_url(url)
+
             update_data["url"] = url
 
         try:
@@ -119,7 +129,7 @@ class EndpointService:
 
         except IntegrityError:
             self.session.rollback()
-            raise
+            raise EndpointConflictError("An endpoint with the same URL already exists.")
 
         except Exception:
             self.session.rollback()
@@ -132,3 +142,25 @@ class EndpointService:
 
         await self.endpoint_repository.soft_delete(endpoint=endpoint)
         self.session.commit()
+
+
+def validate_safe_webhook_url(url: str) -> None:
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise EndpointValidationError(
+            "Webhook URL must have a valid scheme (http or https) and a valid host."
+        )
+
+    if not parsed.hostname:
+        raise EndpointValidationError("Webhook URL must have a valid host.")
+
+    try:
+        ip = ipaddress.ip_address(parsed.hostname)
+        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+            raise EndpointValidationError(
+                "Webhook URL must not point to a private, loopback, reserved, or link-local IP address."
+            )
+
+    except (socket.gaierror, ValueError):
+        pass
