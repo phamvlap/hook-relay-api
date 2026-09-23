@@ -1,15 +1,15 @@
-from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.enum import BaseStrEnum
 from src.models.base import BaseModel
 from src.models.delivery import WebhookDelivery
 
 
-class WebhookEndpointStatus(StrEnum):
+class WebhookEndpointStatus(BaseStrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
 

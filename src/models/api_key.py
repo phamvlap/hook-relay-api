@@ -1,26 +1,22 @@
 from datetime import datetime
-from enum import StrEnum
 from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.enum import BaseStrEnum
 from src.models.base import BaseModel
 
 
-class APIKeyStatus(StrEnum):
+class APIKeyStatus(BaseStrEnum):
     ACTIVE = "active"
     REVOKED = "revoked"
 
 
-class APIKeyEnvironment(StrEnum):
+class APIKeyEnvironment(BaseStrEnum):
     TEST = "test"
     LIVE = "live"
-
-    @classmethod
-    def values(cls) -> tuple[str, ...]:
-        return tuple(member.value for member in cls)
 
 
 class APIKey(BaseModel):

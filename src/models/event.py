@@ -1,5 +1,4 @@
 from collections import Counter
-from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -8,11 +7,12 @@ from sqlalchemy import ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.enum import BaseStrEnum
 from src.models.base import BaseModel
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
 
 
-class WebhookEventStatus(StrEnum):
+class WebhookEventStatus(BaseStrEnum):
     QUEUED = "queued"
     PROCESSING = "processing"
     COMPLETED = "completed"

@@ -1,5 +1,4 @@
 from datetime import datetime
-from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -8,10 +7,11 @@ from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.enum import BaseStrEnum
 from src.models.base import BaseModel
 
 
-class WebhookDeliveryStatus(StrEnum):
+class WebhookDeliveryStatus(BaseStrEnum):
     QUEUED = "queued"
     DELIVERING = "delivering"
     SUCCESS = "success"
