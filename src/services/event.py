@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
-from src.exceptions.event import EventNotFoundError
+from src.exceptions.event import EventConflictError, EventNotFoundError
 from src.models.delivery import WebhookDelivery
 from src.models.endpoint import WebhookEndpointStatus
 from src.models.event import WebhookEventStatus
@@ -40,54 +40,83 @@ class EventService:
         self,
         *,
         data: EventCreateRequest,
+        idempotency_key: str | None = None,
         owner_id: str | UUID,
     ) -> EventCreateResponse:
+        if idempotency_key:
+            # Check if an event with the same idempotency key already exists
+            existing_event = await self.event_repository.get_by_idempotency_key(
+                idempotency_key=idempotency_key,
+                owner_id=owner_id,
+            )
+            if existing_event:
+                return EventCreateResponse.model_validate(existing_event)
+
+        deliveries: list[WebhookDelivery] = []
+
         try:
-            event = await self.event_repository.create(
-                event_type=data.event_type,
-                payload=data.payload,
-                owner_id=owner_id,
-            )
-
-            endpoints = await self.endpoint_repository.list(
-                owner_id=owner_id,
-                status=WebhookEndpointStatus.ACTIVE,
-            )
-
-            if not endpoints:
-                await self.event_repository.update(
-                    event=event,
-                    data={"status": WebhookEventStatus.COMPLETED},
-                )
-                self.session.commit()
-                return EventCreateResponse.model_validate(event)
-
-            deliveries: list[WebhookDelivery] = []
-            for endpoint in endpoints:
-                delivery = WebhookDelivery(
-                    event_id=event.id,
-                    endpoint_id=endpoint.id,
+            with self.session.begin_nested():
+                # Create the webhook event
+                event = await self.event_repository.create(
+                    event_type=data.event_type,
+                    payload=data.payload,
+                    idempotency_key=idempotency_key,
                     owner_id=owner_id,
                 )
-                deliveries.append(delivery)
 
-            await self.delivery_repository.bulk_create(deliveries=deliveries)
+                # Get all active endpoints for the owner
+                endpoints = await self.endpoint_repository.list(
+                    owner_id=owner_id,
+                    status=WebhookEndpointStatus.ACTIVE,
+                )
 
+                if not endpoints:
+                    # If there are no active endpoints, mark the event as completed
+                    await self.event_repository.update(
+                        event=event,
+                        data={"status": WebhookEventStatus.COMPLETED},
+                    )
+
+                else:
+                    # Create a delivery for each active endpoint
+                    for endpoint in endpoints:
+                        delivery = WebhookDelivery(
+                            event_id=event.id,
+                            endpoint_id=endpoint.id,
+                            owner_id=owner_id,
+                        )
+                        deliveries.append(delivery)
+
+                    await self.delivery_repository.bulk_create(deliveries=deliveries)
+
+            # Commit the transaction
             self.session.commit()
-
-            task = cast(Task, deliver_webhook_task)
-            for delivery in deliveries:
-                task.delay(str(delivery.id))
-
-            return EventCreateResponse.model_validate(event)
 
         except IntegrityError:
             self.session.rollback()
-            raise
+
+            # If concurrently creating an event with the same idempotency key, check if it already exists
+            if idempotency_key:
+                existing_event = await self.event_repository.get_by_idempotency_key(
+                    idempotency_key=idempotency_key,
+                    owner_id=owner_id,
+                )
+                if existing_event:
+                    return EventCreateResponse.model_validate(existing_event)
+
+            raise EventConflictError()
 
         except Exception:
             self.session.rollback()
             raise
+
+        if deliveries:
+            # Trigger the Celery task to deliver the webhook for each delivery
+            task = cast(Task, deliver_webhook_task)
+            for delivery in deliveries:
+                task.delay(str(delivery.id))
+
+        return EventCreateResponse.model_validate(event)
 
     async def retrieve(
         self,

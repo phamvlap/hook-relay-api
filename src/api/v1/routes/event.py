@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Header, Request, status
 
 from src.api.deps import get_delivery_service, get_event_service, get_page_number_pagination_params
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
@@ -25,11 +25,16 @@ async def create_event(
     data: EventCreateRequest,
     event_service: Annotated[EventService, Depends(get_event_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> EventCreateResponse:
     """
     Create a new event.
     """
-    return await event_service.create(data=data, owner_id=auth.owner_id)
+    return await event_service.create(
+        data=data,
+        idempotency_key=idempotency_key,
+        owner_id=auth.owner_id,
+    )
 
 
 @router.get("", response_model=PageNumberPaginationResponse[EventListResponse])

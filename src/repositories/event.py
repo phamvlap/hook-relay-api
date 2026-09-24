@@ -18,8 +18,14 @@ class EventRepository:
         event_type: str,
         payload: dict[str, Any],
         owner_id: str | UUID,
+        idempotency_key: str | None = None,
     ) -> WebhookEvent:
-        event = WebhookEvent(event_type=event_type, payload=payload, owner_id=owner_id)
+        event = WebhookEvent(
+            event_type=event_type,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            owner_id=owner_id,
+        )
         self.session.add(event)
         self.session.flush()
         return event
@@ -27,6 +33,19 @@ class EventRepository:
     async def get_by_id(self, *, id: str | UUID, owner_id: str | UUID) -> WebhookEvent | None:
         stmt = select(WebhookEvent).where(
             WebhookEvent.id == id,
+            WebhookEvent.owner_id == owner_id,
+            WebhookEvent.deleted_at.is_(None),
+        )
+        return self.session.scalars(stmt).first()
+
+    async def get_by_idempotency_key(
+        self,
+        *,
+        idempotency_key: str,
+        owner_id: str | UUID,
+    ) -> WebhookEvent | None:
+        stmt = select(WebhookEvent).where(
+            WebhookEvent.idempotency_key == idempotency_key,
             WebhookEvent.owner_id == owner_id,
             WebhookEvent.deleted_at.is_(None),
         )

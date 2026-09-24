@@ -2,7 +2,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Enum as SQLEnum
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,6 +35,8 @@ class WebhookEvent(BaseModel):
         default=WebhookEventStatus.QUEUED,
     )
 
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Relationships
     deliveries: Mapped[list[WebhookDelivery]] = relationship(
         "WebhookDelivery",
@@ -42,6 +44,15 @@ class WebhookEvent(BaseModel):
         cascade="all, delete-orphan",
     )
     owner = relationship("Owner", back_populates="events")
+
+    __table_args__ = (
+        Index(
+            "uq_webhook_events_idempotency_key",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL AND deleted_at IS NULL"),
+        ),
+    )
 
 
 def resolve_event_status(
