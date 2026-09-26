@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
-from src.models.endpoint import WebhookEndpointStatus
+from src.models.endpoint import WebhookEndpointSecretStatus, WebhookEndpointStatus
 
 
 class EndpointCreateRequest(BaseModel):
@@ -20,6 +20,15 @@ class EndpointCreateResponse(BaseModel):
     url: str
     status: WebhookEndpointStatus
     max_retries: int
+    secret: str
+    secret_version: int
+    created_at: datetime
+
+
+class EndpointRotateSecretResponse(BaseModel):
+    secret: str
+    version: int
+    status: WebhookEndpointSecretStatus
     created_at: datetime
 
 

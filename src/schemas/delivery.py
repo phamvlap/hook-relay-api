@@ -20,6 +20,7 @@ class DeliveryListInEvent(BaseModel):
 
     id: UUID
     endpoint: NestedEndpointForDeliveryListInEvent
+    secret_version: str
     attempt: int
     status: WebhookDeliveryStatus
     status_code: int | None
@@ -53,6 +54,7 @@ class DeliveryListResponse(BaseModel):
     id: UUID
     endpoint: NestedEndpointForDeliveryListResponse
     event: NestedEventForDeliveryListResponse
+    secret_version: str
     attempt: int
     status: WebhookDeliveryStatus
     status_code: int | None
@@ -87,6 +89,7 @@ class DeliveryRetrieveResponse(BaseModel):
     id: UUID
     endpoint: NestedEndpointForDeliveryRetrieveResponse
     event: NestedEventForDeliveryRetrieveResponse
+    secret_version: str
     attempt: int
     status: WebhookDeliveryStatus
     status_code: int | None

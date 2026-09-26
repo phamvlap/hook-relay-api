@@ -12,7 +12,7 @@ from src.models.delivery import WebhookDelivery
 from src.models.endpoint import WebhookEndpointStatus
 from src.models.event import WebhookEventStatus
 from src.repositories.delivery import DeliveryRepository
-from src.repositories.endpoint import EndpointRepository
+from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.repositories.event import EventRepository
 from src.schemas.event import (
     EventCreateRequest,
@@ -29,10 +29,12 @@ class EventService:
         event_repository: EventRepository,
         endpoint_repository: EndpointRepository,
         delivery_repository: DeliveryRepository,
+        endpoint_secret_repository: EndpointSecretRepository,
         session: Session,
     ) -> None:
         self.event_repository = event_repository
         self.endpoint_repository = endpoint_repository
+        self.endpoint_secret_repository = endpoint_secret_repository
         self.delivery_repository = delivery_repository
         self.session = session
 
@@ -80,10 +82,16 @@ class EventService:
                 else:
                     # Create a delivery for each active endpoint
                     for endpoint in endpoints:
+                        active_secret = await self.endpoint_secret_repository.get_active_secret(
+                            endpoint_id=endpoint.id,
+                        )
+                        secret_version = active_secret.version if active_secret else 1
+
                         delivery = WebhookDelivery(
                             event_id=event.id,
                             endpoint_id=endpoint.id,
                             owner_id=owner_id,
+                            secret_version=secret_version,
                         )
                         deliveries.append(delivery)
 

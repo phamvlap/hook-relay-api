@@ -14,7 +14,7 @@ from src.exceptions.endpoint import (
     EndpointValidationError,
 )
 from src.models.endpoint import WebhookEndpointStatus
-from src.repositories.endpoint import EndpointRepository
+from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.schemas.endpoint import (
     EndpointCreateRequest,
     EndpointCreateResponse,
@@ -22,14 +22,22 @@ from src.schemas.endpoint import (
     EndpointPauseResponse,
     EndpointResumeResponse,
     EndpointRetrieveResponse,
+    EndpointRotateSecretResponse,
     EndpointUpdateRequest,
     EndpointUpdateResponse,
 )
+from src.utils.endpoint import EndpointSecretCrypto
 
 
 class EndpointService:
-    def __init__(self, endpoint_repository: EndpointRepository, session: Session) -> None:
+    def __init__(
+        self,
+        endpoint_repository: EndpointRepository,
+        endpoint_secret_repository: EndpointSecretRepository,
+        session: Session,
+    ) -> None:
         self.endpoint_repository = endpoint_repository
+        self.endpoint_secret_repository = endpoint_secret_repository
         self.session = session
 
     async def create(
@@ -52,8 +60,29 @@ class EndpointService:
                     owner_id=owner_id,
                 )
 
+                endpoint_secret_crypto = EndpointSecretCrypto()
+
+                # Generate initial secret and encrypt it with EndpointSecretCrypto
+                raw_secret = endpoint_secret_crypto.generate_secret()
+                encrypted_secret = endpoint_secret_crypto.encrypt(raw_secret)
+
+                await self.endpoint_secret_repository.create(
+                    endpoint_id=endpoint.id,
+                    encrypted_secret=encrypted_secret,
+                    version=1,
+                )
+
             self.session.commit()
-            return EndpointCreateResponse.model_validate(endpoint)
+            return EndpointCreateResponse(
+                id=endpoint.id,
+                name=endpoint.name,
+                url=endpoint.url,
+                status=endpoint.status,
+                max_retries=endpoint.max_retries,
+                secret=raw_secret,
+                secret_version=1,
+                created_at=endpoint.created_at,
+            )
 
         except IntegrityError:
             self.session.rollback()
@@ -188,6 +217,51 @@ class EndpointService:
 
             self.session.commit()
             return EndpointResumeResponse(success=True)
+
+        except Exception:
+            self.session.rollback()
+            raise
+
+    async def rotate_secret(
+        self,
+        *,
+        endpoint_id: str | UUID,
+        owner_id: str | UUID,
+    ) -> EndpointRotateSecretResponse:
+        endpoint = await self.endpoint_repository.get_by_id(id=endpoint_id, owner_id=owner_id)
+        if not endpoint:
+            raise EndpointNotFoundError()
+
+        try:
+            with self.session.begin_nested():
+                next_version = await self.endpoint_secret_repository.get_next_version(
+                    endpoint_id=endpoint.id,
+                )
+
+                # Revoke existing active secret(s)
+                await self.endpoint_secret_repository.revoke_active_secrets(
+                    endpoint_id=endpoint.id,
+                )
+
+                endpoint_secret_crypto = EndpointSecretCrypto()
+
+                # Generate new secret and encrypt
+                raw_secret = endpoint_secret_crypto.generate_secret()
+                encrypted_secret = endpoint_secret_crypto.encrypt(raw_secret)
+
+                new_secret = await self.endpoint_secret_repository.create(
+                    endpoint_id=endpoint.id,
+                    encrypted_secret=encrypted_secret,
+                    version=next_version,
+                )
+
+            self.session.commit()
+            return EndpointRotateSecretResponse(
+                secret=raw_secret,
+                version=new_secret.version,
+                status=new_secret.status,
+                created_at=new_secret.created_at,
+            )
 
         except Exception:
             self.session.rollback()

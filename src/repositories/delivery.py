@@ -18,8 +18,14 @@ class DeliveryRepository:
         event_id: str | UUID,
         endpoint_id: str | UUID,
         owner_id: str | UUID,
+        secret_version: int = 1,
     ) -> WebhookDelivery:
-        delivery = WebhookDelivery(event_id=event_id, endpoint_id=endpoint_id, owner_id=owner_id)
+        delivery = WebhookDelivery(
+            event_id=event_id,
+            endpoint_id=endpoint_id,
+            owner_id=owner_id,
+            secret_version=secret_version,
+        )
         self.session.flush()
         return delivery
 

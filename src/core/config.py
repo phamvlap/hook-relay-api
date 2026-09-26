@@ -45,12 +45,26 @@ class Settings(BaseSettings):
     # Security configuration
     api_key_pepper: SecretStr = Field(description="High-entropy pepper value for API key hashing")
 
+    # Encryption key for encrypting endpoint secrets
+    endpoint_secret_encryption_key: SecretStr = Field(
+        description="High-entropy encryption key for encrypting endpoint secrets",
+    )
+
     @field_validator("api_key_pepper")
     def validate_api_key_pepper(cls, value: SecretStr) -> SecretStr:
         raw_val = value.get_secret_value().strip()
 
         if len(raw_val) < 12:
             raise ValueError("API key pepper must be at least 12 characters long")
+
+        return value
+
+    @field_validator("endpoint_secret_encryption_key")
+    def validate_endpoint_secret_encryption_key(cls, value: SecretStr) -> SecretStr:
+        raw_val = value.get_secret_value().strip()
+
+        if len(raw_val) < 12:
+            raise ValueError("Endpoint secret encryption key must be at least 12 characters long")
 
         return value
 
@@ -94,6 +108,10 @@ class Settings(BaseSettings):
     @property
     def api_key_pepper_value(self) -> str:
         return self.api_key_pepper.get_secret_value()
+
+    @property
+    def endpoint_secret_encryption_key_value(self) -> str:
+        return self.endpoint_secret_encryption_key.get_secret_value()
 
 
 @lru_cache(maxsize=1)

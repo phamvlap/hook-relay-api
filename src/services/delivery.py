@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -11,13 +12,14 @@ from sqlalchemy.orm import Session
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.exceptions.delivery import DeliveryNotFoundError
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
-from src.models.endpoint import WebhookEndpoint
+from src.models.endpoint import WebhookEndpoint, WebhookEndpointSecret
 from src.models.event import WebhookEvent
 from src.repositories.delivery import DeliveryRepository
-from src.repositories.endpoint import EndpointRepository
+from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.repositories.event import EventRepository
 from src.schemas.delivery import DeliveryListInEvent, DeliveryListResponse, DeliveryRetrieveResponse
 from src.tasks.webhook import deliver_webhook_task
+from src.utils.endpoint import EndpointSecretCrypto
 
 
 def _create_httpx_client() -> httpx.AsyncClient:
@@ -34,12 +36,14 @@ class DeliveryService:
         delivery_repository: DeliveryRepository,
         event_repository: EventRepository,
         endpoint_repository: EndpointRepository,
+        endpoint_secret_repository: EndpointSecretRepository,
         session: Session,
         httpx_client: httpx.AsyncClient | None = None,
     ):
         self.delivery_repository = delivery_repository
         self.event_repository = event_repository
         self.endpoint_repository = endpoint_repository
+        self.endpoint_secret_repository = endpoint_secret_repository
         self.session = session
         self.httpx_client = httpx_client or httpx.AsyncClient(
             timeout=httpx.Timeout(10.0, connect=5.0, read=10.0, write=10.0, pool=None),
@@ -67,6 +71,8 @@ class DeliveryService:
             "data": event.payload,
             "timestamp": event.created_at.isoformat(),
         }
+        payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
         headers = {
             "Content-Type": "application/json",
             "User-Agent": "HookRelay/1.0",
@@ -75,13 +81,43 @@ class DeliveryService:
             "X-Webhook-Timestamp": event.created_at.isoformat(),
         }
 
+        # Resolve signing secret for delivery.secret_version
+        secret: WebhookEndpointSecret | None = None
+        try:
+            secret = await self.endpoint_secret_repository.get_by_version(
+                endpoint_id=endpoint.id,
+                version=delivery.secret_version,
+            )
+        except (ValueError, TypeError):
+            pass
+
+        if not secret:
+            secret = await self.endpoint_secret_repository.get_active_secret(
+                endpoint_id=endpoint.id,
+            )
+
+        endpoint_secret_crypto = EndpointSecretCrypto()
+
+        if secret:
+            raw_secret = endpoint_secret_crypto.decrypt(secret.encrypted_secret)
+            current_timestamp = int(time.time())
+            signature = endpoint_secret_crypto.compute_signature(
+                payload=payload_bytes,
+                secret=raw_secret,
+                timestamp=current_timestamp,
+            )
+            headers["X-Webhook-Signature"] = (
+                f"t={current_timestamp},v{delivery.secret_version}={signature}"
+            )
+            headers["X-Webhook-Secret-Version"] = str(delivery.secret_version)
+
         start_time = time.monotonic()
 
         try:
             async with self.httpx_client as client:
                 response = await client.post(
                     endpoint.url,
-                    json=payload,
+                    content=payload_bytes,
                     headers=headers,
                 )
 

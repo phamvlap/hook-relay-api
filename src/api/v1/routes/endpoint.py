@@ -14,6 +14,7 @@ from src.schemas.endpoint import (
     EndpointPauseResponse,
     EndpointResumeResponse,
     EndpointRetrieveResponse,
+    EndpointRotateSecretResponse,
     EndpointUpdateRequest,
     EndpointUpdateResponse,
 )
@@ -113,3 +114,16 @@ async def resume_endpoint(
     Resume an endpoint by ID.
     """
     return await endpoint_service.resume(endpoint_id=endpoint_id, owner_id=auth.owner_id)
+
+
+@router.post("/{endpoint_id}/rotate-secret", response_model=EndpointRotateSecretResponse)
+async def rotate_endpoint_secret(
+    endpoint_id: UUID,
+    endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
+    auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+) -> EndpointRotateSecretResponse:
+    """
+    Rotate signing secret for an endpoint by ID.
+    Revokes the current active secret and generates a new secret with incremented version.
+    """
+    return await endpoint_service.rotate_secret(endpoint_id=endpoint_id, owner_id=auth.owner_id)

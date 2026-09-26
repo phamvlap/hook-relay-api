@@ -2,7 +2,7 @@ import asyncio
 
 from src.database.session import get_local_session
 from src.repositories.delivery import DeliveryRepository
-from src.repositories.endpoint import EndpointRepository
+from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.repositories.event import EventRepository
 from src.tasks.celery_app import celery_app
 
@@ -18,6 +18,7 @@ def deliver_webhook_task(delivery_id: str) -> None:
             delivery_repository=DeliveryRepository(session=session),
             event_repository=EventRepository(session=session),
             endpoint_repository=EndpointRepository(session=session),
+            endpoint_secret_repository=EndpointSecretRepository(session=session),
             session=session,
         )
         asyncio.run(delivery_service.deliver(delivery_id=delivery_id))
