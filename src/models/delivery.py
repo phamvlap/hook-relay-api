@@ -36,6 +36,10 @@ class WebhookDelivery(BaseModel):
         nullable=False,
     )
 
+    # The version of the secret used for signing the webhook request. This is stored to ensure
+    # that we can verify the signature of the request even if the secret has been rotated or revoked.
+    secret_version: Mapped[str] = mapped_column(Text, nullable=False)
+
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[WebhookDeliveryStatus] = mapped_column(
         SQLEnum(WebhookDeliveryStatus, name="webhook_delivery_status"),
