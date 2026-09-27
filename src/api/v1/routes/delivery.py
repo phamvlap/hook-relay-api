@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, status
 
 from src.api.deps import get_delivery_service, get_page_number_pagination_params
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
@@ -11,6 +11,7 @@ from src.schemas.delivery import (
     DeliveryAttemptListResponse,
     DeliveryListResponse,
     DeliveryRetrieveResponse,
+    DeliveryRetryResponse,
 )
 from src.services.delivery import DeliveryService
 
@@ -67,6 +68,26 @@ async def get_delivery_attempts(
     """
     return await delivery_service.list_attempts(
         request=request,
+        delivery_id=delivery_id,
+        owner_id=auth.owner_id,
+    )
+
+
+@router.post(
+    "/{delivery_id}/retry",
+    response_model=DeliveryRetryResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def retry_delivery(
+    delivery_id: UUID,
+    delivery_service: Annotated[DeliveryService, Depends(get_delivery_service)],
+    auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+) -> DeliveryRetryResponse:
+    """
+    Manually retry a dead-letter webhook delivery.
+    Only deliveries in 'dead_letter' status can be retried.
+    """
+    return await delivery_service.retry(
         delivery_id=delivery_id,
         owner_id=auth.owner_id,
     )

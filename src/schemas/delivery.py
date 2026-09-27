@@ -22,6 +22,8 @@ class DeliveryListInEvent(BaseModel):
     endpoint: NestedEndpointForDeliveryListInEvent
     secret_version: int
     attempt: int
+    retry_count: int
+    manual_retry_count: int
     status: WebhookDeliveryStatus
     status_code: int | None
     response_body: dict[str, Any] | None
@@ -56,6 +58,8 @@ class DeliveryListResponse(BaseModel):
     event: NestedEventForDeliveryListResponse
     secret_version: int
     attempt: int
+    retry_count: int
+    manual_retry_count: int
     status: WebhookDeliveryStatus
     status_code: int | None
     response_body: dict[str, Any] | None
@@ -108,6 +112,8 @@ class DeliveryRetrieveResponse(BaseModel):
     event: NestedEventForDeliveryRetrieveResponse
     secret_version: int
     attempt: int
+    retry_count: int
+    manual_retry_count: int
     status: WebhookDeliveryStatus
     status_code: int | None
     response_body: dict[str, Any] | None
@@ -135,3 +141,7 @@ class DeliveryAttemptListResponse(BaseModel):
     started_at: datetime
     completed_at: datetime
     created_at: datetime
+
+
+class DeliveryRetryResponse(BaseModel):
+    success: bool

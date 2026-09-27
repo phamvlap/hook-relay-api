@@ -41,6 +41,8 @@ class WebhookDelivery(BaseModel):
     secret_version: Mapped[int] = mapped_column(Integer, nullable=False)
 
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    manual_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[WebhookDeliveryStatus] = mapped_column(
         SQLEnum(WebhookDeliveryStatus, name="webhook_delivery_status"),
         nullable=False,

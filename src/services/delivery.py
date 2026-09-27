@@ -10,9 +10,13 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
-from src.exceptions.delivery import DeliveryNotFoundError
+from src.exceptions.delivery import DeliveryNotEligibleForRetryError, DeliveryNotFoundError
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
-from src.models.endpoint import WebhookEndpoint, WebhookEndpointSecret
+from src.models.endpoint import (
+    WebhookEndpoint,
+    WebhookEndpointSecret,
+    WebhookEndpointStatus,
+)
 from src.models.event import WebhookEvent
 from src.repositories.delivery import DeliveryAttemptRepository, DeliveryRepository
 from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
@@ -22,6 +26,7 @@ from src.schemas.delivery import (
     DeliveryListInEvent,
     DeliveryListResponse,
     DeliveryRetrieveResponse,
+    DeliveryRetryResponse,
 )
 from src.tasks.webhook import deliver_webhook_task
 from src.utils.endpoint import EndpointSecretCrypto
@@ -291,8 +296,6 @@ class DeliveryService:
         duration_ms: int,
         status_code: int | None = None,
     ) -> None:
-        attempt = delivery.attempt + 1
-
         if not should_retry:
             await self.delivery_repository.mark_as_failed(
                 delivery=delivery,
@@ -302,20 +305,25 @@ class DeliveryService:
             )
             return
 
-        if attempt >= max_retries:
+        next_retry_count = delivery.retry_count + 1
+        next_attempt = delivery.attempt + 1
+
+        if next_retry_count >= max_retries:
             await self.delivery_repository.mark_as_dead_letter(
                 delivery=delivery,
-                attempt=attempt,
+                attempt=next_attempt,
+                retry_count=next_retry_count,
                 status_code=status_code,
                 error_message=error_message,
                 duration_ms=duration_ms,
             )
             return
 
-        retry_delay = self._compute_retry_delay(attempt)
+        retry_delay = self._compute_retry_delay(delivery.retry_count)
         await self.delivery_repository.mark_as_retrying(
             delivery=delivery,
-            attempt=attempt,
+            attempt=next_attempt,
+            retry_count=next_retry_count,
             status_code=status_code,
             error_message=error_message,
             duration_ms=duration_ms,
@@ -325,8 +333,8 @@ class DeliveryService:
         task = cast(Task, deliver_webhook_task)
         task.apply_async(args=[str(delivery.id)], countdown=retry_delay)
 
-    def _compute_retry_delay(self, attempt: int) -> float:
-        base_delay = 2 ** (attempt - 1)
+    def _compute_retry_delay(self, retry_count: int) -> float:
+        base_delay = 2**retry_count
         jitter = base_delay * 0.1
         return base_delay + jitter
 
@@ -423,3 +431,40 @@ class DeliveryService:
             page_size=total,
             items=[DeliveryAttemptListResponse.model_validate(item) for item in items],
         )
+
+    async def retry(
+        self,
+        *,
+        delivery_id: str | UUID,
+        owner_id: str | UUID,
+    ) -> DeliveryRetryResponse:
+        delivery = await self.delivery_repository.get_by_id_for_update(
+            delivery_id=delivery_id,
+            owner_id=owner_id,
+        )
+        if not delivery:
+            raise DeliveryNotFoundError()
+
+        if delivery.status != WebhookDeliveryStatus.DEAD_LETTER:
+            raise DeliveryNotEligibleForRetryError(
+                f"Delivery is in '{delivery.status}' status. Only 'dead_letter' deliveries can be manually retried."
+            )
+
+        if not delivery.endpoint or delivery.endpoint.status != WebhookEndpointStatus.ACTIVE:
+            raise DeliveryNotEligibleForRetryError("Associated endpoint is inactive or not found.")
+
+        try:
+            with self.session.begin_nested():
+                await self.delivery_repository.mark_as_queued_for_retry(delivery=delivery)
+                await self._sync_event_status(event_id=str(delivery.event_id))
+
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+
+        task = cast(Task, deliver_webhook_task)
+        task.delay(str(delivery.id))
+
+        await self.retrieve(delivery_id=delivery.id, owner_id=owner_id)
+        return DeliveryRetryResponse(success=True)

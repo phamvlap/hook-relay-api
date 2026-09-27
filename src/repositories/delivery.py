@@ -185,6 +185,7 @@ class DeliveryRepository:
         *,
         delivery: WebhookDelivery,
         attempt: int,
+        retry_count: int | None = None,
         status_code: int | None = None,
         response_body: dict[str, Any] | None = None,
         error_message: str | None = None,
@@ -192,6 +193,8 @@ class DeliveryRepository:
     ) -> WebhookDelivery:
         delivery.status = WebhookDeliveryStatus.DEAD_LETTER
         delivery.attempt = attempt
+        if retry_count is not None:
+            delivery.retry_count = retry_count
         delivery.status_code = status_code
         delivery.error_message = error_message
         delivery.duration_ms = duration_ms
@@ -209,6 +212,7 @@ class DeliveryRepository:
         delivery: WebhookDelivery,
         next_retry_at: datetime,
         attempt: int,
+        retry_count: int | None = None,
         status_code: int | None = None,
         response_body: dict[str, Any] | None = None,
         error_message: str | None = None,
@@ -217,12 +221,51 @@ class DeliveryRepository:
         delivery.status = WebhookDeliveryStatus.RETRYING
         delivery.next_retry_at = next_retry_at
         delivery.attempt = attempt
+        if retry_count is not None:
+            delivery.retry_count = retry_count
         delivery.status_code = status_code
         delivery.error_message = error_message
         delivery.duration_ms = duration_ms
 
         if response_body is not None:
             delivery.response_body = response_body
+
+        self.session.flush()
+
+        return delivery
+
+    async def get_by_id_for_update(
+        self,
+        *,
+        delivery_id: str | UUID,
+        owner_id: str | UUID,
+    ) -> WebhookDelivery | None:
+        stmt = (
+            select(WebhookDelivery)
+            .where(
+                WebhookDelivery.id == delivery_id,
+                WebhookDelivery.owner_id == owner_id,
+                WebhookDelivery.deleted_at.is_(None),
+            )
+            .options(
+                selectinload(WebhookDelivery.endpoint),
+                selectinload(WebhookDelivery.event),
+                selectinload(WebhookDelivery.attempts),
+            )
+            .with_for_update()
+        )
+        return self.session.scalars(stmt).first()
+
+    async def mark_as_queued_for_retry(self, *, delivery: WebhookDelivery) -> WebhookDelivery:
+        delivery.status = WebhookDeliveryStatus.QUEUED
+        delivery.retry_count = 0
+        delivery.manual_retry_count += 1
+        delivery.next_retry_at = None
+        delivery.status_code = None
+        delivery.response_body = None
+        delivery.error_message = None
+        delivery.duration_ms = None
+        delivery.delivered_at = None
 
         self.session.flush()
 
