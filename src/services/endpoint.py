@@ -11,6 +11,7 @@ from src.core.pagination import PageNumberPaginationParams, PageNumberPagination
 from src.exceptions.endpoint import (
     EndpointConflictError,
     EndpointNotFoundError,
+    EndpointSecretConflictError,
     EndpointValidationError,
 )
 from src.models.endpoint import WebhookEndpointStatus
@@ -262,6 +263,10 @@ class EndpointService:
                 status=new_secret.status,
                 created_at=new_secret.created_at,
             )
+
+        except IntegrityError:
+            self.session.rollback()
+            raise EndpointSecretConflictError()
 
         except Exception:
             self.session.rollback()

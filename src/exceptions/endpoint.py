@@ -17,3 +17,10 @@ class EndpointConflictError(ConflictError):
 
     def __init__(self, message: str = "An endpoint with the same name or URL already exists"):
         super().__init__(message)
+
+
+class EndpointSecretConflictError(ConflictError):
+    """Exception raised for conflicts related to endpoint secrets."""
+
+    def __init__(self, message: str = "An endpoint secret with the same version already exists"):
+        super().__init__(message)
