@@ -5,7 +5,11 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
+from src.models.delivery import (
+    WebhookDelivery,
+    WebhookDeliveryAttempt,
+    WebhookDeliveryStatus,
+)
 
 
 class DeliveryRepository:
@@ -41,7 +45,11 @@ class DeliveryRepository:
                 WebhookDelivery.owner_id == owner_id,
                 WebhookDelivery.deleted_at.is_(None),
             )
-            .options(joinedload(WebhookDelivery.endpoint), joinedload(WebhookDelivery.event))
+            .options(
+                joinedload(WebhookDelivery.endpoint),
+                joinedload(WebhookDelivery.event),
+                selectinload(WebhookDelivery.attempts),
+            )
         )
         return self.session.scalars(stmt).first()
 
@@ -244,3 +252,60 @@ class DeliveryRepository:
             .with_for_update()
         )
         return self.session.scalars(stmt).first()
+
+
+class DeliveryAttemptRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    async def create(
+        self,
+        *,
+        delivery_id: str | UUID,
+        attempt_number: int,
+        started_at: datetime,
+        completed_at: datetime,
+        duration_ms: int | None = None,
+        status_code: int | None = None,
+        request_headers: dict[str, Any] | None = None,
+        response_headers: dict[str, Any] | None = None,
+        response_body: dict[str, Any] | None = None,
+        error_message: str | None = None,
+    ) -> WebhookDeliveryAttempt:
+        attempt = WebhookDeliveryAttempt(
+            delivery_id=delivery_id,
+            attempt_number=attempt_number,
+            status_code=status_code,
+            request_headers=request_headers,
+            response_headers=response_headers,
+            response_body=response_body,
+            error_message=error_message,
+            duration_ms=duration_ms,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+        self.session.add(attempt)
+        self.session.flush()
+        return attempt
+
+    async def count_by_delivery_id(self, *, delivery_id: str | UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(WebhookDeliveryAttempt)
+            .where(
+                WebhookDeliveryAttempt.delivery_id == delivery_id,
+                WebhookDeliveryAttempt.deleted_at.is_(None),
+            )
+        )
+        return self.session.scalar(stmt) or 0
+
+    async def list_by_delivery_id(self, *, delivery_id: str | UUID) -> list[WebhookDeliveryAttempt]:
+        stmt = (
+            select(WebhookDeliveryAttempt)
+            .where(
+                WebhookDeliveryAttempt.delivery_id == delivery_id,
+                WebhookDeliveryAttempt.deleted_at.is_(None),
+            )
+            .order_by(WebhookDeliveryAttempt.attempt_number.asc())
+        )
+        return list(self.session.scalars(stmt).all())

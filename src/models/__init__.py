@@ -1,5 +1,5 @@
 from .api_key import APIKey, APIKeyEnvironment, APIKeyStatus
-from .delivery import WebhookDelivery, WebhookDeliveryStatus
+from .delivery import WebhookDelivery, WebhookDeliveryAttempt, WebhookDeliveryStatus
 from .endpoint import (
     WebhookEndpoint,
     WebhookEndpointSecret,
@@ -15,6 +15,7 @@ __all__ = [
     "APIKeyStatus",
     "Owner",
     "WebhookDelivery",
+    "WebhookDeliveryAttempt",
     "WebhookDeliveryStatus",
     "WebhookEndpoint",
     "WebhookEndpointSecret",

@@ -14,10 +14,15 @@ from src.exceptions.delivery import DeliveryNotFoundError
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
 from src.models.endpoint import WebhookEndpoint, WebhookEndpointSecret
 from src.models.event import WebhookEvent
-from src.repositories.delivery import DeliveryRepository
+from src.repositories.delivery import DeliveryAttemptRepository, DeliveryRepository
 from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.repositories.event import EventRepository
-from src.schemas.delivery import DeliveryListInEvent, DeliveryListResponse, DeliveryRetrieveResponse
+from src.schemas.delivery import (
+    DeliveryAttemptListResponse,
+    DeliveryListInEvent,
+    DeliveryListResponse,
+    DeliveryRetrieveResponse,
+)
 from src.tasks.webhook import deliver_webhook_task
 from src.utils.endpoint import EndpointSecretCrypto
 
@@ -34,6 +39,7 @@ class DeliveryService:
     def __init__(
         self,
         delivery_repository: DeliveryRepository,
+        delivery_attempt_repository: DeliveryAttemptRepository,
         event_repository: EventRepository,
         endpoint_repository: EndpointRepository,
         endpoint_secret_repository: EndpointSecretRepository,
@@ -41,6 +47,7 @@ class DeliveryService:
         httpx_client: httpx.AsyncClient | None = None,
     ):
         self.delivery_repository = delivery_repository
+        self.delivery_attempt_repository = delivery_attempt_repository
         self.event_repository = event_repository
         self.endpoint_repository = endpoint_repository
         self.endpoint_secret_repository = endpoint_secret_repository
@@ -111,7 +118,10 @@ class DeliveryService:
             )
             headers["X-Webhook-Secret-Version"] = str(delivery.secret_version)
 
+        current_attempt_num = delivery.attempt
+        started_at = datetime.now(tz=UTC)
         start_time = time.monotonic()
+        sanitized_headers = self._sanitize_request_headers(headers)
 
         try:
             async with self.httpx_client as client:
@@ -121,20 +131,47 @@ class DeliveryService:
                     headers=headers,
                 )
 
+            completed_at = datetime.now(tz=UTC)
             duration_ms = int((time.monotonic() - start_time) * 1000)
+            response_body = self._get_response_body(response)
+            response_headers = dict(response.headers)
 
             if self._is_successful_status(response.status_code):
+                await self.delivery_attempt_repository.create(
+                    delivery_id=delivery.id,
+                    attempt_number=current_attempt_num,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_ms=duration_ms,
+                    status_code=response.status_code,
+                    request_headers=sanitized_headers,
+                    response_headers=response_headers,
+                    response_body=response_body,
+                )
                 await self.delivery_repository.mark_as_success(
                     delivery=delivery,
                     status_code=response.status_code,
-                    response_body=self._get_response_body(response),
+                    response_body=response_body,
                     duration_ms=duration_ms,
                 )
 
             elif self._should_retry(response.status_code):
+                error_message = f"HTTP {response.status_code}"
+                await self.delivery_attempt_repository.create(
+                    delivery_id=delivery.id,
+                    attempt_number=current_attempt_num,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_ms=duration_ms,
+                    status_code=response.status_code,
+                    request_headers=sanitized_headers,
+                    response_headers=response_headers,
+                    response_body=response_body,
+                    error_message=error_message,
+                )
                 await self._process_retry_or_failure(
                     delivery=delivery,
-                    error_message=f"HTTP {response.status_code}",
+                    error_message=error_message,
                     should_retry=True,
                     max_retries=endpoint.max_retries,
                     duration_ms=duration_ms,
@@ -142,43 +179,79 @@ class DeliveryService:
                 )
 
             else:
+                error_message = f"Received status code {response.status_code}"
+                await self.delivery_attempt_repository.create(
+                    delivery_id=delivery.id,
+                    attempt_number=current_attempt_num,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_ms=duration_ms,
+                    status_code=response.status_code,
+                    request_headers=sanitized_headers,
+                    response_headers=response_headers,
+                    response_body=response_body,
+                    error_message=error_message,
+                )
                 await self.delivery_repository.mark_as_failed(
                     delivery=delivery,
                     status_code=response.status_code,
-                    response_body=self._get_response_body(response),
-                    error_message=f"Received status code {response.status_code}",
+                    response_body=response_body,
+                    error_message=error_message,
                     duration_ms=duration_ms,
                 )
 
         except httpx.InvalidURL as exc:
+            completed_at = datetime.now(tz=UTC)
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            await self.delivery_attempt_repository.create(
+                delivery_id=delivery.id,
+                attempt_number=current_attempt_num,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+                status_code=None,
+                request_headers=sanitized_headers,
+                error_message=str(exc),
+            )
             await self.delivery_repository.mark_as_failed(
                 delivery=delivery,
                 status_code=None,
                 error_message=str(exc),
-                duration_ms=int((time.monotonic() - start_time) * 1000),
+                duration_ms=duration_ms,
             )
 
-        except httpx.TimeoutException as exc:
+        except (httpx.TimeoutException, httpx.RequestError) as exc:
+            completed_at = datetime.now(tz=UTC)
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            await self.delivery_attempt_repository.create(
+                delivery_id=delivery.id,
+                attempt_number=current_attempt_num,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+                status_code=None,
+                request_headers=sanitized_headers,
+                error_message=str(exc),
+            )
             await self._process_retry_or_failure(
                 delivery=delivery,
                 error_message=str(exc),
                 should_retry=True,
                 max_retries=endpoint.max_retries,
-                duration_ms=int((time.monotonic() - start_time) * 1000),
-            )
-
-        except httpx.RequestError as exc:
-            await self._process_retry_or_failure(
-                delivery=delivery,
-                error_message=str(exc),
-                should_retry=True,
-                max_retries=endpoint.max_retries,
-                duration_ms=int((time.monotonic() - start_time) * 1000),
+                duration_ms=duration_ms,
+                status_code=None,
             )
 
         finally:
             self.session.commit()
             await self._sync_event_status(event_id=str(event.id))
+
+    def _sanitize_request_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        sanitized = dict(headers)
+        for key in list(sanitized.keys()):
+            if key.lower() in ("authorization", "cookie", "proxy-authorization"):
+                sanitized[key] = "[REDACTED]"
+        return sanitized
 
     def _is_successful_status(self, status_code: int) -> bool:
         return 200 <= status_code < 300
@@ -186,10 +259,22 @@ class DeliveryService:
     def _should_retry(self, status_code: int) -> bool:
         return status_code in (408, 429) or (500 <= status_code < 600)
 
-    def _get_response_body(self, response: httpx.Response) -> dict[str, Any] | None:
+    def _get_response_body(
+        self,
+        response: httpx.Response,
+        max_bytes: int = 65536,
+    ) -> dict[str, Any] | None:
         try:
+            if len(response.content) > max_bytes:
+                return {
+                    "_truncated": True,
+                    "preview": response.text[:1024],
+                    "content_length": len(response.content),
+                }
             return response.json()
         except (TypeError, ValueError):
+            if response.text:
+                return {"raw": response.text[:1024]}
             return None
 
     async def _sync_event_status(self, event_id: str) -> None:
@@ -316,3 +401,25 @@ class DeliveryService:
             raise DeliveryNotFoundError()
 
         return DeliveryRetrieveResponse.model_validate(delivery)
+
+    async def list_attempts(
+        self,
+        *,
+        request: Request,
+        delivery_id: str | UUID,
+        owner_id: str | UUID,
+    ) -> PageNumberPaginationResponse[DeliveryAttemptListResponse]:
+        delivery = await self.delivery_repository.get_by_id(id=delivery_id, owner_id=owner_id)
+        if not delivery:
+            raise DeliveryNotFoundError()
+
+        total = await self.delivery_attempt_repository.count_by_delivery_id(delivery_id=delivery.id)
+        items = await self.delivery_attempt_repository.list_by_delivery_id(delivery_id=delivery.id)
+
+        return PageNumberPaginationResponse.build(
+            request=request,
+            total=total,
+            page=1,
+            page_size=total,
+            items=[DeliveryAttemptListResponse.model_validate(item) for item in items],
+        )

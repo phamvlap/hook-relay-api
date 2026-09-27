@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.core.pagination import PageNumberPaginationParams
 from src.database.session import LocalSession
-from src.repositories.delivery import DeliveryRepository
+from src.repositories.delivery import DeliveryAttemptRepository, DeliveryRepository
 from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.repositories.event import EventRepository
 from src.services.delivery import DeliveryService
@@ -40,6 +40,10 @@ def get_delivery_repository(session: SessionDep) -> DeliveryRepository:
     return DeliveryRepository(session=session)
 
 
+def get_delivery_attempt_repository(session: SessionDep) -> DeliveryAttemptRepository:
+    return DeliveryAttemptRepository(session=session)
+
+
 def get_event_repository(session: SessionDep) -> EventRepository:
     return EventRepository(session=session)
 
@@ -64,6 +68,10 @@ def get_delivery_service(
     event_repository: Annotated[EventRepository, Depends(get_event_repository)],
     endpoint_repository: Annotated[EndpointRepository, Depends(get_endpoint_repository)],
     delivery_repository: Annotated[DeliveryRepository, Depends(get_delivery_repository)],
+    delivery_attempt_repository: Annotated[
+        DeliveryAttemptRepository,
+        Depends(get_delivery_attempt_repository),
+    ],
     endpoint_secret_repository: Annotated[
         EndpointSecretRepository,
         Depends(get_endpoint_secret_repository),
@@ -74,6 +82,7 @@ def get_delivery_service(
         event_repository=event_repository,
         endpoint_repository=endpoint_repository,
         delivery_repository=delivery_repository,
+        delivery_attempt_repository=delivery_attempt_repository,
         endpoint_secret_repository=endpoint_secret_repository,
     )
 

@@ -7,7 +7,11 @@ from src.api.deps import get_delivery_service, get_page_number_pagination_params
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.core.security import AuthContext, get_auth_context_from_api_key
 from src.models.delivery import WebhookDeliveryStatus
-from src.schemas.delivery import DeliveryListResponse, DeliveryRetrieveResponse
+from src.schemas.delivery import (
+    DeliveryAttemptListResponse,
+    DeliveryListResponse,
+    DeliveryRetrieveResponse,
+)
 from src.services.delivery import DeliveryService
 
 router = APIRouter()
@@ -46,3 +50,23 @@ async def get_delivery(
     Get a delivery by ID.
     """
     return await delivery_service.retrieve(delivery_id=delivery_id, owner_id=auth.owner_id)
+
+
+@router.get(
+    "/{delivery_id}/attempts",
+    response_model=PageNumberPaginationResponse[DeliveryAttemptListResponse],
+)
+async def get_delivery_attempts(
+    request: Request,
+    delivery_id: UUID,
+    delivery_service: Annotated[DeliveryService, Depends(get_delivery_service)],
+    auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+) -> PageNumberPaginationResponse[DeliveryAttemptListResponse]:
+    """
+    Get all execution attempts for a delivery.
+    """
+    return await delivery_service.list_attempts(
+        request=request,
+        delivery_id=delivery_id,
+        owner_id=auth.owner_id,
+    )

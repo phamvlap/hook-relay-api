@@ -20,7 +20,7 @@ class DeliveryListInEvent(BaseModel):
 
     id: UUID
     endpoint: NestedEndpointForDeliveryListInEvent
-    secret_version: str
+    secret_version: int
     attempt: int
     status: WebhookDeliveryStatus
     status_code: int | None
@@ -54,7 +54,7 @@ class DeliveryListResponse(BaseModel):
     id: UUID
     endpoint: NestedEndpointForDeliveryListResponse
     event: NestedEventForDeliveryListResponse
-    secret_version: str
+    secret_version: int
     attempt: int
     status: WebhookDeliveryStatus
     status_code: int | None
@@ -83,13 +83,30 @@ class NestedEventForDeliveryRetrieveResponse(BaseModel):
     payload: dict[str, Any]
 
 
+class NestedAttemptInRetrieveDeliveryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    delivery_id: UUID
+    attempt_number: int
+    status_code: int | None
+    request_headers: dict[str, Any] | None
+    response_headers: dict[str, Any] | None
+    response_body: dict[str, Any] | None
+    error_message: str | None
+    duration_ms: int | None
+    started_at: datetime
+    completed_at: datetime
+    created_at: datetime
+
+
 class DeliveryRetrieveResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     endpoint: NestedEndpointForDeliveryRetrieveResponse
     event: NestedEventForDeliveryRetrieveResponse
-    secret_version: str
+    secret_version: int
     attempt: int
     status: WebhookDeliveryStatus
     status_code: int | None
@@ -100,3 +117,21 @@ class DeliveryRetrieveResponse(BaseModel):
     delivered_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    attempts: list[NestedAttemptInRetrieveDeliveryResponse] = []
+
+
+class DeliveryAttemptListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    delivery_id: UUID
+    attempt_number: int
+    status_code: int | None
+    request_headers: dict[str, Any] | None
+    response_headers: dict[str, Any] | None
+    response_body: dict[str, Any] | None
+    error_message: str | None
+    duration_ms: int | None
+    started_at: datetime
+    completed_at: datetime
+    created_at: datetime
