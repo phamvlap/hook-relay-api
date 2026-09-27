@@ -416,19 +416,24 @@ class DeliveryService:
         request: Request,
         delivery_id: str | UUID,
         owner_id: str | UUID,
+        page_params: PageNumberPaginationParams,
     ) -> PageNumberPaginationResponse[DeliveryAttemptListResponse]:
         delivery = await self.delivery_repository.get_by_id(id=delivery_id, owner_id=owner_id)
         if not delivery:
             raise DeliveryNotFoundError()
 
         total = await self.delivery_attempt_repository.count_by_delivery_id(delivery_id=delivery.id)
-        items = await self.delivery_attempt_repository.list_by_delivery_id(delivery_id=delivery.id)
+        items = await self.delivery_attempt_repository.list_by_delivery_id(
+            delivery_id=delivery.id,
+            offset=page_params.offset,
+            limit=page_params.limit,
+        )
 
         return PageNumberPaginationResponse.build(
             request=request,
             total=total,
-            page=1,
-            page_size=total,
+            page=page_params.page,
+            page_size=page_params.page_size,
             items=[DeliveryAttemptListResponse.model_validate(item) for item in items],
         )
 
@@ -466,5 +471,4 @@ class DeliveryService:
         task = cast(Task, deliver_webhook_task)
         task.delay(str(delivery.id))
 
-        await self.retrieve(delivery_id=delivery.id, owner_id=owner_id)
         return DeliveryRetryResponse(success=True)

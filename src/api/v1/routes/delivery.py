@@ -60,6 +60,7 @@ async def get_delivery(
 async def get_delivery_attempts(
     request: Request,
     delivery_id: UUID,
+    page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
     delivery_service: Annotated[DeliveryService, Depends(get_delivery_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
 ) -> PageNumberPaginationResponse[DeliveryAttemptListResponse]:
@@ -70,6 +71,7 @@ async def get_delivery_attempts(
         request=request,
         delivery_id=delivery_id,
         owner_id=auth.owner_id,
+        page_params=page_params,
     )
 
 

@@ -342,13 +342,24 @@ class DeliveryAttemptRepository:
         )
         return self.session.scalar(stmt) or 0
 
-    async def list_by_delivery_id(self, *, delivery_id: str | UUID) -> list[WebhookDeliveryAttempt]:
-        stmt = (
-            select(WebhookDeliveryAttempt)
-            .where(
-                WebhookDeliveryAttempt.delivery_id == delivery_id,
-                WebhookDeliveryAttempt.deleted_at.is_(None),
-            )
-            .order_by(WebhookDeliveryAttempt.attempt_number.asc())
+    async def list_by_delivery_id(
+        self,
+        *,
+        delivery_id: str | UUID,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> list[WebhookDeliveryAttempt]:
+        stmt = select(WebhookDeliveryAttempt).where(
+            WebhookDeliveryAttempt.delivery_id == delivery_id,
+            WebhookDeliveryAttempt.deleted_at.is_(None),
         )
+
+        if offset is not None:
+            stmt = stmt.offset(offset)
+
+        if limit is not None:
+            stmt = stmt.limit(limit)
+
+        stmt = stmt.order_by(WebhookDeliveryAttempt.attempt_number.asc())
+
         return list(self.session.scalars(stmt).all())
