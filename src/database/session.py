@@ -1,3 +1,6 @@
+from collections.abc import Generator
+from contextlib import contextmanager
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -18,3 +21,17 @@ LocalSession = sessionmaker(bind=engine, autocommit=False, autoflush=False, expi
 
 def get_local_session() -> Session:
     return LocalSession()
+
+
+@contextmanager
+def get_db_context() -> Generator[Session]:
+    """Provides a transactional database session context manager for Celery workers & scripts."""
+    session = LocalSession()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

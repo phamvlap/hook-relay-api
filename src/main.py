@@ -12,12 +12,15 @@ from src.api.deps import SessionDep
 from src.api.v1.routes import router as v1_router
 from src.core.config import settings
 from src.core.error_handlers import register_exception_handlers
+from src.infrastructure.redis.client import get_async_redis_client
+from src.lifespan import lifespan
 from src.tasks.general import health_check_task
 
 app = FastAPI(
     title="Hook Relay API",
     description="A simple API for relaying webhooks.",
     version="1.0",
+    lifespan=lifespan,
 )
 register_exception_handlers(app)
 
@@ -49,7 +52,13 @@ def health_check() -> dict[str, str]:
 
 @app.get("/ready", tags=["Health"])
 async def readiness_check(session: SessionDep) -> dict[str, str]:
+    # Check PostgreSQL database connection
     session.execute(text("SELECT 1"))
+
+    # Check Redis connection
+    redis_client = get_async_redis_client()
+    await redis_client.ping()
+
     return {
         "name": "hook-relay-api",
         "version": "1.0",

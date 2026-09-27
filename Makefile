@@ -23,6 +23,9 @@ run:
 celery-worker:
 	uv run celery -A src.tasks.celery_app worker --loglevel=info
 
+celery-beat:
+	uv run celery -A src.tasks.celery_app beat --loglevel=info
+
 # Database migrations
 init-migrations:
 	alembic init alembic

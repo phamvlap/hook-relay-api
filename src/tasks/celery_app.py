@@ -21,4 +21,10 @@ celery_app.conf.update(
     task_default_retry_delay=5,  # 5 seconds before retry
     task_max_retries=3,
     imports=["src.tasks"],  # Import tasks from the general module
+    beat_schedule={
+        "flush-api-key-last-used-every-30-seconds": {
+            "task": "src.tasks.api_key.flush_api_key_last_used_task",
+            "schedule": 60.0,
+        },
+    },
 )

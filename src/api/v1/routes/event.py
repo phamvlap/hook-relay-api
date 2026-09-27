@@ -4,8 +4,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Request, status
 
 from src.api.deps import get_delivery_service, get_event_service, get_page_number_pagination_params
+from src.core.context import AuthContext
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
-from src.core.security import AuthContext, get_auth_context_from_api_key
+from src.core.security import get_auth_context_from_api_key
 from src.models.event import WebhookEventStatus
 from src.schemas.delivery import DeliveryListInEvent
 from src.schemas.event import (
