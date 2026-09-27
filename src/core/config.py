@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     # Application configuration
     environment: Literal["development", "staging", "production"] = "development"
 
+    allowed_hosts: str = Field(
+        default="*",
+        description="Comma-separated list of allowed hosts for the application",
+    )
+    cors_origins: str = Field(
+        default="*",
+        description="Comma-separated list of allowed origins for CORS",
+    )
+
     # PostgreSQL database configuration
     db_host: str = Field(description="PostgreSQL database host")
     db_port: int = Field(ge=1, le=65535, description="PostgreSQL database port")
@@ -112,6 +121,16 @@ class Settings(BaseSettings):
     @property
     def endpoint_secret_encryption_key_value(self) -> str:
         return self.endpoint_secret_encryption_key.get_secret_value()
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        hosts = [host.strip() for host in self.allowed_hosts.split(",") if host.strip()]
+        return hosts
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        return origins
 
 
 @lru_cache(maxsize=1)

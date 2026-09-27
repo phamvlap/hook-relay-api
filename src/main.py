@@ -4,10 +4,13 @@ from celery import Task
 from celery.exceptions import OperationalError as CeleryOperationalError
 from celery.exceptions import TimeoutError as CeleryTimeoutError
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.api.deps import SessionDep
 from src.api.v1.routes import router as v1_router
+from src.core.config import settings
 from src.core.error_handlers import register_exception_handlers
 from src.tasks.general import health_check_task
 
@@ -17,6 +20,18 @@ app = FastAPI(
     version="1.0",
 )
 register_exception_handlers(app)
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.allowed_hosts_list,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(v1_router, prefix="/api/v1")
 
