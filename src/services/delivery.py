@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
@@ -10,6 +10,7 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
+from src.core.retry import RetryPolicy, webhook_delivery_policy
 from src.exceptions.delivery import DeliveryNotEligibleForRetryError, DeliveryNotFoundError
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
 from src.models.endpoint import (
@@ -50,6 +51,7 @@ class DeliveryService:
         endpoint_secret_repository: EndpointSecretRepository,
         session: Session,
         httpx_client: httpx.AsyncClient | None = None,
+        retry_policy: RetryPolicy | None = None,
     ):
         self.delivery_repository = delivery_repository
         self.delivery_attempt_repository = delivery_attempt_repository
@@ -62,6 +64,7 @@ class DeliveryService:
             follow_redirects=False,
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
         )
+        self.retry_policy = retry_policy or webhook_delivery_policy
 
     async def deliver(self, *, delivery_id: str | UUID) -> None:
         delivery = await self.delivery_repository.get_delivery_for_processing(
@@ -160,7 +163,11 @@ class DeliveryService:
                     duration_ms=duration_ms,
                 )
 
-            elif self._should_retry(response.status_code):
+            elif self.retry_policy.should_retry(
+                current_retry_count=delivery.retry_count,
+                status_code=response.status_code,
+                custom_max_retries=endpoint.max_retries,
+            ):
                 error_message = f"HTTP {response.status_code}"
                 await self.delivery_attempt_repository.create(
                     delivery_id=delivery.id,
@@ -181,6 +188,7 @@ class DeliveryService:
                     max_retries=endpoint.max_retries,
                     duration_ms=duration_ms,
                     status_code=response.status_code,
+                    response_headers=response_headers,
                 )
 
             else:
@@ -261,9 +269,6 @@ class DeliveryService:
     def _is_successful_status(self, status_code: int) -> bool:
         return 200 <= status_code < 300
 
-    def _should_retry(self, status_code: int) -> bool:
-        return status_code in (408, 429) or (500 <= status_code < 600)
-
     def _get_response_body(
         self,
         response: httpx.Response,
@@ -295,6 +300,7 @@ class DeliveryService:
         max_retries: int,
         duration_ms: int,
         status_code: int | None = None,
+        response_headers: dict[str, str] | None = None,
     ) -> None:
         if not should_retry:
             await self.delivery_repository.mark_as_failed(
@@ -308,18 +314,34 @@ class DeliveryService:
         next_retry_count = delivery.retry_count + 1
         next_attempt = delivery.attempt + 1
 
-        if next_retry_count >= max_retries:
-            await self.delivery_repository.mark_as_dead_letter(
-                delivery=delivery,
-                attempt=next_attempt,
-                retry_count=next_retry_count,
-                status_code=status_code,
-                error_message=error_message,
-                duration_ms=duration_ms,
-            )
+        if not self.retry_policy.should_retry(
+            current_retry_count=delivery.retry_count,
+            status_code=status_code,
+            custom_max_retries=max_retries,
+        ):
+            if next_retry_count >= max_retries:
+                await self.delivery_repository.mark_as_dead_letter(
+                    delivery=delivery,
+                    attempt=next_attempt,
+                    retry_count=next_retry_count,
+                    status_code=status_code,
+                    error_message=error_message,
+                    duration_ms=duration_ms,
+                )
+            else:
+                await self.delivery_repository.mark_as_failed(
+                    delivery=delivery,
+                    status_code=status_code,
+                    error_message=error_message,
+                    duration_ms=duration_ms,
+                )
             return
 
-        retry_delay = self._compute_retry_delay(delivery.retry_count)
+        retry_delay = self.retry_policy.compute_delay(
+            retry_count=delivery.retry_count,
+            status_code=status_code,
+            headers=response_headers,
+        )
         await self.delivery_repository.mark_as_retrying(
             delivery=delivery,
             attempt=next_attempt,
@@ -327,19 +349,11 @@ class DeliveryService:
             status_code=status_code,
             error_message=error_message,
             duration_ms=duration_ms,
-            next_retry_at=self._compute_next_retry_time(retry_delay),
+            next_retry_at=self.retry_policy.compute_next_retry_time(delay_seconds=retry_delay),
         )
 
         task = cast(Task, deliver_webhook_task)
         task.apply_async(args=[str(delivery.id)], countdown=retry_delay)
-
-    def _compute_retry_delay(self, retry_count: int) -> float:
-        base_delay = 2**retry_count
-        jitter = base_delay * 0.1
-        return base_delay + jitter
-
-    def _compute_next_retry_time(self, delay: float) -> datetime:
-        return datetime.now(UTC) + timedelta(seconds=delay)
 
     async def list_by_event(
         self,
