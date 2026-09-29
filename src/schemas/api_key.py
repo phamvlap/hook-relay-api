@@ -18,15 +18,3 @@ class APIKeyCreateResponse(BaseModel):
     last_used_at: datetime | None
     revoked_at: datetime | None
     api_key: str
-
-
-class APIKeyResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    owner_id: UUID
-    key_id: str
-    key_hash: str
-    status: APIKeyStatus
-    environment: APIKeyEnvironment
-    last_used_at: datetime | None
