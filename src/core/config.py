@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
 
     # Application configuration
-    environment: Literal["development", "staging", "production"] = "development"
+    environment: Literal["development", "staging", "production", "test"] = "development"
 
     allowed_hosts: str = Field(
         default="*",

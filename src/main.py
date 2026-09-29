@@ -1,11 +1,13 @@
-from typing import cast
+from typing import Any, cast
 
 from celery import Task
 from celery.exceptions import OperationalError as CeleryOperationalError
 from celery.exceptions import TimeoutError as CeleryTimeoutError
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from redis.exceptions import RedisError
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.api.deps import SessionDep
@@ -51,18 +53,43 @@ def health_check() -> dict[str, str]:
 
 
 @app.get("/ready", tags=["Health"])
-async def readiness_check(session: SessionDep) -> dict[str, str]:
-    # Check PostgreSQL database connection
-    session.execute(text("SELECT 1"))
+async def readiness_check(session: SessionDep, response: Response) -> dict[str, Any]:
+    services: dict[str, str] = {
+        "database": "connected",
+        "redis": "connected",
+    }
+    is_ready = True
 
-    # Check Redis connection
-    redis_client = get_async_redis_client()
-    await redis_client.ping()
+    # 1. Check PostgreSQL database connection
+    try:
+        session.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        services["database"] = "disconnected"
+        is_ready = False
+
+    # 2. Check Redis connection
+    try:
+        redis_client = get_async_redis_client()
+        await redis_client.ping()
+    except RedisError:
+        services["redis"] = "disconnected"
+        is_ready = False
+
+    # 3. If any dependency is down, return 503 Service Unavailable
+    if not is_ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "name": "hook-relay-api",
+            "version": "1.0",
+            "status": "not_ready",
+            "services": services,
+        }
 
     return {
         "name": "hook-relay-api",
         "version": "1.0",
         "status": "ready",
+        "services": services,
     }
 
 
