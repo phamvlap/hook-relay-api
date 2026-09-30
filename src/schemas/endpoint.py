@@ -7,7 +7,7 @@ from src.models.endpoint import WebhookEndpointSecretStatus, WebhookEndpointStat
 
 
 class EndpointCreateRequest(BaseModel):
-    name: str = Field(..., max_length=255)
+    name: str = Field(..., min_length=1, max_length=255)
     url: AnyHttpUrl
     max_retries: int = Field(default=5, ge=0, le=20)
 
@@ -55,7 +55,7 @@ class EndpointListResponse(BaseModel):
 
 
 class EndpointUpdateRequest(BaseModel):
-    name: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
     url: AnyHttpUrl | None = Field(default=None)
     max_retries: int | None = Field(default=None, ge=0, le=20)
 

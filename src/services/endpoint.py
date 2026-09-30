@@ -273,7 +273,35 @@ class EndpointService:
             raise
 
 
+_LOCAL_HOSTNAME_SET = frozenset(("localhost", "localhost.localdomain"))
+_LOCAL_SUFFIXES = (".localhost", ".local")
+
+
+def _is_hostname_local(hostname: str) -> bool:
+    """
+    Check if the hostname is a localhost or local domain.
+    """
+    return hostname in _LOCAL_HOSTNAME_SET or hostname.endswith(_LOCAL_SUFFIXES)
+
+
+def _is_ip_unsafe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """
+    Check if an IP address is private, loopback, reserved, or link-local.
+    """
+    return ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local
+
+
 def validate_safe_webhook_url(url: str) -> None:
+    """
+    Validate that a webhook URL has a valid scheme/host and does not point to
+    private, loopback, reserved, or link-local addresses (anti-SSRF check).
+
+    Args:
+        url: The webhook destination URL to validate.
+
+    Raises:
+        EndpointValidationError: If the URL is invalid or targets an internal/unsafe destination.
+    """
     parsed = urlparse(url)
 
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
@@ -284,12 +312,32 @@ def validate_safe_webhook_url(url: str) -> None:
     if not parsed.hostname:
         raise EndpointValidationError("Webhook URL must have a valid host.")
 
+    hostname = parsed.hostname.lower().strip()
+    if _is_hostname_local(hostname):
+        raise EndpointValidationError(
+            "Webhook URL must not point to a private, loopback, reserved, or link-local address."
+        )
+
+    # 1. Direct IP address check
     try:
-        ip = ipaddress.ip_address(parsed.hostname)
-        if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        ip = None
+
+    if ip is not None:
+        if _is_ip_unsafe(ip):
             raise EndpointValidationError(
                 "Webhook URL must not point to a private, loopback, reserved, or link-local IP address."
             )
+        return
 
+    # 2. Domain name DNS resolution check
+    try:
+        resolved_ip_str = socket.gethostbyname(hostname)
+        resolved_ip = ipaddress.ip_address(resolved_ip_str)
+        if _is_ip_unsafe(resolved_ip):
+            raise EndpointValidationError(
+                "Webhook URL must not point to a private, loopback, reserved, or link-local address."
+            )
     except (socket.gaierror, ValueError):
         pass
