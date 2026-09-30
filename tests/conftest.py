@@ -3,6 +3,7 @@
 import os
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -21,10 +22,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from src.api.deps import get_db
 from src.core.config import settings
@@ -33,6 +34,7 @@ from src.core.security import get_auth_context_from_api_key
 from src.database.db import Base
 from src.main import app as application
 from src.models.api_key import APIKeyEnvironment
+from src.models.owner import Owner
 
 _CLIENT_BASE_URL = "http://testserver"
 
@@ -100,32 +102,21 @@ def app() -> Generator[FastAPI]:
 
 @pytest.fixture(scope="function")
 def db_session(db_engine, app: FastAPI) -> Generator[Session]:
-    """Provides an isolated database session per test via SAVEPOINT rollback.
+    """Provides an isolated database session per test via transactional rollback.
 
-    Every commit made inside the test or application code will only commit to
-    the SAVEPOINT. When the test finishes, the outer transaction is rolled back,
-    leaving the database 100% untouched for the next test.
-    Automatically hooks this session into FastAPI's get_db dependency.
+    Uses SQLAlchemy 2.0's native join_transaction_mode='create_savepoint'.
+    All commits, rollbacks, and nested transaction context managers (with session.begin_nested())
+    inside application services operate within SAVEPOINTs, leaving the outer test
+    transaction completely untouched and cleanly rolled back at test teardown.
     """
     connection = db_engine.connect()
     transaction = connection.begin()
 
-    SessionLocal = sessionmaker(
+    session = Session(
         bind=connection,
-        autocommit=False,
-        autoflush=False,
+        join_transaction_mode="create_savepoint",
         expire_on_commit=False,
     )
-    session = SessionLocal()
-
-    # Begin the first SAVEPOINT
-    session.begin_nested()
-
-    # Whenever the application commits the SAVEPOINT, immediately open a new one
-    @event.listens_for(session, "after_transaction_end")
-    def restart_savepoint(session_obj, trans):
-        if trans.nested and not trans._parent.nested:
-            session_obj.begin_nested()
 
     # Hook the isolated test session into FastAPI's get_db dependency
     app.dependency_overrides[get_db] = lambda: session
@@ -175,6 +166,28 @@ def authenticated_client(app: FastAPI, mock_auth_context: AuthContext) -> FastAP
     """Bypasses API key authentication by overriding get_auth_context_from_api_key."""
     app.dependency_overrides[get_auth_context_from_api_key] = lambda: mock_auth_context
     return app
+
+
+@pytest.fixture
+def test_owner(db_session: Session) -> Owner:
+    """Creates and persists an Owner in the test database within the transactional rollback."""
+    owner = Owner()
+    db_session.add(owner)
+    db_session.flush()
+    return owner
+
+
+@pytest.fixture
+def test_owner_auth(app: FastAPI, test_owner: Any) -> AuthContext:
+    """Provides an AuthContext referencing the real persisted test_owner."""
+    auth_ctx = AuthContext(
+        api_key_id=uuid4(),
+        owner_id=test_owner.id,
+        key_id="test_key_persisted_owner",
+        environment=APIKeyEnvironment.TEST,
+    )
+    app.dependency_overrides[get_auth_context_from_api_key] = lambda: auth_ctx
+    return auth_ctx
 
 
 # ---------------------------------------------------------------------------
