@@ -70,7 +70,12 @@ class DeliveryService:
         delivery = await self.delivery_repository.get_delivery_for_processing(
             delivery_id=delivery_id,
         )
-        if not delivery or not delivery.endpoint or not delivery.event:
+        if (
+            not delivery
+            or not delivery.endpoint
+            or delivery.endpoint.deleted_at is not None
+            or not delivery.event
+        ):
             return
 
         endpoint: WebhookEndpoint = delivery.endpoint
@@ -469,7 +474,11 @@ class DeliveryService:
                 f"Delivery is in '{delivery.status}' status. Only 'dead_letter' deliveries can be manually retried."
             )
 
-        if not delivery.endpoint or delivery.endpoint.status != WebhookEndpointStatus.ACTIVE:
+        if (
+            not delivery.endpoint
+            or delivery.endpoint.deleted_at is not None
+            or delivery.endpoint.status != WebhookEndpointStatus.ACTIVE
+        ):
             raise DeliveryNotEligibleForRetryError("Associated endpoint is inactive or not found.")
 
         try:
