@@ -19,12 +19,14 @@ class EventRepository:
         payload: dict[str, Any],
         owner_id: str | UUID,
         idempotency_key: str | None = None,
+        status: WebhookEventStatus = WebhookEventStatus.QUEUED,
     ) -> WebhookEvent:
         event = WebhookEvent(
             event_type=event_type,
             payload=payload,
             idempotency_key=idempotency_key,
             owner_id=owner_id,
+            status=status,
         )
         self.session.add(event)
         self.session.flush()
@@ -102,7 +104,7 @@ class EventRepository:
         self.session.flush()
         return event
 
-    async def resolve_and_update_status(self, *, event_id: str) -> WebhookEvent | None:
+    async def resolve_and_update_status(self, *, event_id: str) -> bool:
         stmt = (
             select(WebhookEvent)
             .where(
@@ -114,7 +116,7 @@ class EventRepository:
         event = self.session.scalars(stmt).first()
 
         if not event:
-            return None
+            return False
 
         delivery_status_stmt = (
             select(WebhookDelivery.status, func.count())
@@ -130,5 +132,6 @@ class EventRepository:
         if event.status != resolved_status:
             event.status = resolved_status
             self.session.flush()
+            return True
 
-        return event
+        return False

@@ -58,28 +58,26 @@ class EventService:
 
         try:
             with self.session.begin_nested():
-                # Create the webhook event
-                event = await self.event_repository.create(
-                    event_type=data.event_type,
-                    payload=data.payload,
-                    idempotency_key=idempotency_key,
-                    owner_id=owner_id,
-                )
-
                 # Get all active endpoints for the owner
                 endpoints = await self.endpoint_repository.list(
                     owner_id=owner_id,
                     status=WebhookEndpointStatus.ACTIVE,
                 )
 
-                if not endpoints:
-                    # If there are no active endpoints, mark the event as completed
-                    await self.event_repository.update(
-                        event=event,
-                        data={"status": WebhookEventStatus.COMPLETED},
-                    )
+                initial_event_status = (
+                    WebhookEventStatus.COMPLETED if not endpoints else WebhookEventStatus.QUEUED
+                )
 
-                else:
+                # Create the webhook event
+                event = await self.event_repository.create(
+                    event_type=data.event_type,
+                    payload=data.payload,
+                    idempotency_key=idempotency_key,
+                    owner_id=owner_id,
+                    status=initial_event_status,
+                )
+
+                if endpoints:
                     # Create a delivery for each active endpoint
                     for endpoint in endpoints:
                         active_secret = await self.endpoint_secret_repository.get_active_secret(

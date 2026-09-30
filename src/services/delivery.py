@@ -78,6 +78,9 @@ class DeliveryService:
         ):
             return
 
+        if delivery.endpoint.status != WebhookEndpointStatus.ACTIVE:
+            return
+
         endpoint: WebhookEndpoint = delivery.endpoint
         event: WebhookEvent = delivery.event
 
@@ -293,8 +296,9 @@ class DeliveryService:
             return None
 
     async def _sync_event_status(self, event_id: str) -> None:
-        await self.event_repository.resolve_and_update_status(event_id=event_id)
-        self.session.commit()
+        updated = await self.event_repository.resolve_and_update_status(event_id=event_id)
+        if updated:
+            self.session.commit()
 
     async def _process_retry_or_failure(
         self,

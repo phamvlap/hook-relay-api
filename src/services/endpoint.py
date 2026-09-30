@@ -140,7 +140,12 @@ class EndpointService:
         if not endpoint:
             raise EndpointNotFoundError()
 
-        update_data = data.model_dump(exclude_unset=True)
+        request_data = data.model_dump(exclude_unset=True)
+        update_data = {k: v for k, v in request_data.items() if getattr(request_data, k, None) != v}
+
+        if not update_data:
+            return EndpointUpdateResponse.model_validate(endpoint)
+
         if "url" in update_data and update_data["url"] is not None:
             url = str(update_data["url"])
 
@@ -185,6 +190,9 @@ class EndpointService:
         if not endpoint:
             raise EndpointNotFoundError()
 
+        if endpoint.status == WebhookEndpointStatus.PAUSED:
+            return EndpointPauseResponse(success=True)
+
         try:
             with self.session.begin_nested():
                 await self.endpoint_repository.update(
@@ -208,6 +216,9 @@ class EndpointService:
         endpoint = await self.endpoint_repository.get_by_id(id=endpoint_id, owner_id=owner_id)
         if not endpoint:
             raise EndpointNotFoundError()
+
+        if endpoint.status == WebhookEndpointStatus.ACTIVE:
+            return EndpointResumeResponse(success=True)
 
         try:
             with self.session.begin_nested():
