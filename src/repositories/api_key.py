@@ -4,7 +4,6 @@ from uuid import UUID
 from sqlalchemy import column, select, update, values
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.context import APIKeyAuthData
 from src.models.api_key import APIKey, APIKeyEnvironment
 
 
@@ -32,25 +31,14 @@ class APIKeyRepository:
         await self.session.flush()
         return api_key
 
-    async def get_auth_data(self, *, key_id: str) -> APIKeyAuthData | None:
-        """Retrieves authentication and verification data for an API key."""
+    async def get_by_key_id(self, *, key_id: str) -> APIKey | None:
+        """Retrieves an API key by its key ID."""
         stmt = select(APIKey).where(
             APIKey.key_id == key_id,
             APIKey.deleted_at.is_(None),
         )
         result = await self.session.execute(stmt)
-        api_key = result.scalars().first()
-        if api_key is None:
-            return None
-
-        return APIKeyAuthData(
-            api_key_id=api_key.id,
-            owner_id=api_key.owner_id,
-            key_id=api_key.key_id,
-            key_hash=api_key.key_hash,
-            status=api_key.status,
-            environment=api_key.environment,
-        )
+        return result.scalars().first()
 
     async def bulk_update_last_used(self, usages: dict[str, datetime]) -> int:
         """Bulk updates last_used_at timestamp for multiple API keys in a single query."""
