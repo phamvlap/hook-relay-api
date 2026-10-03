@@ -158,9 +158,10 @@ class TestCLIExecuteCreateOwnerWorkflow:
         mock_owner_response: OwnerCreateResponse,
         mock_api_key_response: APIKeyCreateResponse,
     ):
-        mock_session = MagicMock()
+        mock_session = AsyncMock()
         mock_ctx = MagicMock()
-        mock_ctx.__enter__.return_value = mock_session
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
 
         mock_owner_service = MagicMock()
         mock_owner_service.create = AsyncMock(return_value=mock_owner_response)
@@ -169,7 +170,7 @@ class TestCLIExecuteCreateOwnerWorkflow:
         mock_api_key_service.create = AsyncMock(return_value=mock_api_key_response)
 
         with (
-            patch("src.cli.get_db_context", return_value=mock_ctx) as mock_db_ctx,
+            patch("src.cli.get_async_db_context", return_value=mock_ctx) as mock_db_ctx,
             patch("src.cli.OwnerRepository") as mock_owner_repo_cls,
             patch(
                 "src.cli.OwnerService", return_value=mock_owner_service
@@ -186,7 +187,7 @@ class TestCLIExecuteCreateOwnerWorkflow:
 
             # Assert context manager entered
             mock_db_ctx.assert_called_once()
-            mock_ctx.__enter__.assert_called_once()
+            mock_ctx.__aenter__.assert_awaited_once()
 
             # Assert repositories instantiated with session
             mock_owner_repo_cls.assert_called_once_with(mock_session)

@@ -25,7 +25,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from src.api.deps import get_db
 from src.core.config import settings
@@ -78,14 +79,24 @@ def db_engine():
         finally:
             admin_engine.dispose()
 
-    engine = create_engine(
+    sync_engine = create_engine(
         settings.postgres_dsn_str,
         pool_pre_ping=True,
     )
     # Ensure tables exist
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=sync_engine)
+    sync_engine.dispose()
+
+    engine = create_async_engine(
+        settings.postgres_async_dsn_str,
+        poolclass=NullPool,
+        connect_args={
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+        },
+    )
     yield engine
-    engine.dispose()
+    engine.sync_engine.dispose()
 
 
 @pytest.fixture
@@ -101,7 +112,7 @@ def app() -> Generator[FastAPI]:
 
 
 @pytest.fixture(scope="function")
-def db_session(db_engine, app: FastAPI) -> Generator[Session]:
+async def db_session(db_engine, app: FastAPI) -> AsyncGenerator[AsyncSession]:
     """Provides an isolated database session per test via transactional rollback.
 
     Uses SQLAlchemy 2.0's native join_transaction_mode='create_savepoint'.
@@ -109,10 +120,10 @@ def db_session(db_engine, app: FastAPI) -> Generator[Session]:
     inside application services operate within SAVEPOINTs, leaving the outer test
     transaction completely untouched and cleanly rolled back at test teardown.
     """
-    connection = db_engine.connect()
-    transaction = connection.begin()
+    connection = await db_engine.connect()
+    transaction = await connection.begin()
 
-    session = Session(
+    session = AsyncSession(
         bind=connection,
         join_transaction_mode="create_savepoint",
         expire_on_commit=False,
@@ -124,9 +135,10 @@ def db_session(db_engine, app: FastAPI) -> Generator[Session]:
     try:
         yield session
     finally:
-        session.close()
-        transaction.rollback()
-        connection.close()
+        await session.close()
+        if transaction.is_active:
+            await transaction.rollback()
+        await connection.close()
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +176,7 @@ def mock_auth_context() -> AuthContext:
 @pytest.fixture
 def authenticated_client(app: FastAPI, mock_auth_context: AuthContext) -> FastAPI:
     """Bypasses API key authentication by overriding get_auth_context_from_api_key."""
+
     def _override(request: Request) -> AuthContext:
         request.state.auth = mock_auth_context
         return mock_auth_context
@@ -173,11 +186,11 @@ def authenticated_client(app: FastAPI, mock_auth_context: AuthContext) -> FastAP
 
 
 @pytest.fixture
-def test_owner(db_session: Session) -> Owner:
+async def test_owner(db_session: AsyncSession) -> Owner:
     """Creates and persists an Owner in the test database within the transactional rollback."""
     owner = Owner()
     db_session.add(owner)
-    db_session.flush()
+    await db_session.flush()
     return owner
 
 

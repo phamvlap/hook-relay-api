@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src.database.session import get_db_context
+from src.database.session import get_async_db_context
 from src.models.api_key import APIKeyEnvironment
 from src.repositories.api_key import APIKeyRepository
 from src.repositories.owner import OwnerRepository
@@ -101,7 +101,7 @@ async def _execute_create_owner(
     environment: APIKeyEnvironment,
 ) -> tuple[OwnerCreateResponse, APIKeyCreateResponse]:
     """Encapsulates the transactional workflow for creating an owner and initial API key."""
-    with get_db_context() as session:
+    async with get_async_db_context() as session:
         owner_repo = OwnerRepository(session)
         owner_service = OwnerService(owner_repository=owner_repo, session=session)
 

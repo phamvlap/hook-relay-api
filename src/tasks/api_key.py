@@ -1,4 +1,6 @@
-from src.database.session import get_db_context
+import asyncio
+
+from src.database.session import get_async_db_context
 from src.infrastructure.redis.client import get_sync_redis_client
 from src.infrastructure.redis.usage_buffer import APIKeyUsageBuffer
 from src.repositories.api_key import APIKeyRepository
@@ -17,7 +19,9 @@ def flush_api_key_last_used_task() -> int:
     if not usages:
         return 0
 
-    with get_db_context() as session:
-        repo = APIKeyRepository(session)
-        updated_count = repo.bulk_update_last_used(usages)
-        return updated_count
+    async def _flush() -> int:
+        async with get_async_db_context() as session:
+            repo = APIKeyRepository(session)
+            return await repo.bulk_update_last_used(usages)
+
+    return asyncio.run(_flush())

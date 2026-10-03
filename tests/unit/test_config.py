@@ -81,5 +81,9 @@ class TestSettingsValidation:
             "postgresql://app_user:secret_pw@db.example.com:5432/prod_db"
             in settings.postgres_dsn_str
         )
+        assert (
+            "postgresql+asyncpg://app_user:secret_pw@db.example.com:5432/prod_db"
+            in settings.postgres_async_dsn_str
+        )
         assert "redis://redis.example.com:6379/2" in settings.redis_dsn_str
         assert settings.rate_limit_enabled is True

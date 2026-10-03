@@ -13,7 +13,8 @@ from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.delivery import WebhookDelivery, WebhookDeliveryAttempt, WebhookDeliveryStatus
 
@@ -158,7 +159,7 @@ async def test_get_delivery_by_id_and_not_found(
 async def test_get_delivery_attempts(
     test_owner_auth,
     async_client: AsyncClient,
-    db_session: Session,
+    db_session: AsyncSession,
 ):
     """Verifies listing immutable execution attempts for a delivery."""
     # 1. Setup endpoint and event to create delivery
@@ -196,7 +197,7 @@ async def test_get_delivery_attempts(
         completed_at=now,
     )
     db_session.add_all([attempt1, attempt2])
-    db_session.flush()
+    await db_session.flush()
 
     # 4. Query attempts
     res = await async_client.get(f"/api/v1/deliveries/{delivery_id}/attempts")
@@ -216,7 +217,7 @@ async def test_get_delivery_attempts(
 async def test_get_delivery_attempts_pagination(
     test_owner_auth,
     async_client: AsyncClient,
-    db_session: Session,
+    db_session: AsyncSession,
 ):
     """Verifies pagination on /api/v1/deliveries/{delivery_id}/attempts."""
     await async_client.post(
@@ -239,7 +240,7 @@ async def test_get_delivery_attempts_pagination(
             completed_at=now,
         )
         db_session.add(attempt)
-    db_session.flush()
+    await db_session.flush()
 
     paged_res = await async_client.get(
         f"/api/v1/deliveries/{delivery_id}/attempts",
@@ -281,7 +282,7 @@ async def test_retry_delivery_conflict_when_not_in_dead_letter(
 async def test_retry_delivery_conflict_when_endpoint_inactive(
     test_owner_auth,
     async_client: AsyncClient,
-    db_session: Session,
+    db_session: AsyncSession,
 ):
     """Verifies that attempting to retry a delivery whose endpoint is paused returns 409 Conflict."""
     ep = (
@@ -297,10 +298,11 @@ async def test_retry_delivery_conflict_when_endpoint_inactive(
     ]["id"]
 
     # Set delivery to DEAD_LETTER in DB
-    delivery = db_session.query(WebhookDelivery).filter_by(id=delivery_id).first()
+    stmt = select(WebhookDelivery).where(WebhookDelivery.id == delivery_id)
+    delivery = (await db_session.execute(stmt)).scalars().first()
     assert delivery is not None
     delivery.status = WebhookDeliveryStatus.DEAD_LETTER
-    db_session.flush()
+    await db_session.flush()
 
     # Pause the endpoint
     await async_client.patch(f"/api/v1/endpoints/{ep['id']}/pause")
@@ -315,7 +317,7 @@ async def test_retry_delivery_conflict_when_endpoint_inactive(
 async def test_retry_delivery_success_when_dead_letter_and_active(
     test_owner_auth,
     async_client: AsyncClient,
-    db_session: Session,
+    db_session: AsyncSession,
     mocker,
 ):
     """Verifies that dead_letter delivery with an active endpoint successfully queues for retry."""
@@ -330,10 +332,11 @@ async def test_retry_delivery_success_when_dead_letter_and_active(
     ]["id"]
 
     # Transition delivery to DEAD_LETTER
-    delivery = db_session.query(WebhookDelivery).filter_by(id=delivery_id).first()
+    stmt = select(WebhookDelivery).where(WebhookDelivery.id == delivery_id)
+    delivery = (await db_session.execute(stmt)).scalars().first()
     assert delivery is not None
     delivery.status = WebhookDeliveryStatus.DEAD_LETTER
-    db_session.flush()
+    await db_session.flush()
 
     # Spy on Celery deliver_webhook_task
     mock_task = mocker.patch("src.services.delivery.deliver_webhook_task.delay")
@@ -347,7 +350,7 @@ async def test_retry_delivery_success_when_dead_letter_and_active(
     mock_task.assert_called_once_with(str(delivery_id))
 
     # Assert delivery status updated in DB
-    db_session.refresh(delivery)
+    await db_session.refresh(delivery)
     assert delivery.status == WebhookDeliveryStatus.QUEUED
 
 
@@ -365,7 +368,7 @@ async def test_retry_delivery_not_found(
 async def test_retry_delivery_conflict_when_endpoint_deleted(
     test_owner_auth,
     async_client: AsyncClient,
-    db_session: Session,
+    db_session: AsyncSession,
 ):
     """Verifies that attempting to retry a delivery whose endpoint is soft-deleted returns 409 Conflict."""
     ep = (
@@ -381,10 +384,11 @@ async def test_retry_delivery_conflict_when_endpoint_deleted(
     ]["id"]
 
     # Set delivery to DEAD_LETTER
-    delivery = db_session.query(WebhookDelivery).filter_by(id=delivery_id).first()
+    stmt = select(WebhookDelivery).where(WebhookDelivery.id == delivery_id)
+    delivery = (await db_session.execute(stmt)).scalars().first()
     assert delivery is not None
     delivery.status = WebhookDeliveryStatus.DEAD_LETTER
-    db_session.flush()
+    await db_session.flush()
 
     # Soft-delete the endpoint
     del_res = await async_client.delete(f"/api/v1/endpoints/{ep['id']}")

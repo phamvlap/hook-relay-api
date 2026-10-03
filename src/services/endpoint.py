@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import Request
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.exceptions.endpoint import (
@@ -35,7 +35,7 @@ class EndpointService:
         self,
         endpoint_repository: EndpointRepository,
         endpoint_secret_repository: EndpointSecretRepository,
-        session: Session,
+        session: AsyncSession,
     ) -> None:
         self.endpoint_repository = endpoint_repository
         self.endpoint_secret_repository = endpoint_secret_repository
@@ -53,7 +53,7 @@ class EndpointService:
         validate_safe_webhook_url(url)
 
         try:
-            with self.session.begin_nested():
+            async with self.session.begin_nested():
                 endpoint = await self.endpoint_repository.create(
                     name=data.name,
                     url=url,
@@ -73,7 +73,7 @@ class EndpointService:
                     version=1,
                 )
 
-            self.session.commit()
+            await self.session.commit()
             return EndpointCreateResponse(
                 id=endpoint.id,
                 name=endpoint.name,
@@ -86,11 +86,11 @@ class EndpointService:
             )
 
         except IntegrityError:
-            self.session.rollback()
+            await self.session.rollback()
             raise EndpointConflictError("An endpoint with the same URL already exists.")
 
         except Exception:
-            self.session.rollback()
+            await self.session.rollback()
             raise
 
     async def retrieve(
@@ -155,21 +155,21 @@ class EndpointService:
             update_data["url"] = url
 
         try:
-            with self.session.begin_nested():
+            async with self.session.begin_nested():
                 updated_endpoint = await self.endpoint_repository.update(
                     endpoint=endpoint,
                     data=update_data,
                 )
 
-            self.session.commit()
+            await self.session.commit()
             return EndpointUpdateResponse.model_validate(updated_endpoint)
 
         except IntegrityError:
-            self.session.rollback()
+            await self.session.rollback()
             raise EndpointConflictError("An endpoint with the same URL already exists.")
 
         except Exception:
-            self.session.rollback()
+            await self.session.rollback()
             raise
 
     async def delete(self, *, endpoint_id: str | UUID, owner_id: str | UUID) -> None:
@@ -178,7 +178,7 @@ class EndpointService:
             raise EndpointNotFoundError()
 
         await self.endpoint_repository.soft_delete(endpoint=endpoint)
-        self.session.commit()
+        await self.session.commit()
 
     async def pause(
         self,
@@ -194,17 +194,17 @@ class EndpointService:
             return EndpointPauseResponse(success=True)
 
         try:
-            with self.session.begin_nested():
+            async with self.session.begin_nested():
                 await self.endpoint_repository.update(
                     endpoint=endpoint,
                     data={"status": WebhookEndpointStatus.PAUSED},
                 )
 
-            self.session.commit()
+            await self.session.commit()
             return EndpointPauseResponse(success=True)
 
         except Exception:
-            self.session.rollback()
+            await self.session.rollback()
             raise
 
     async def resume(
@@ -221,17 +221,17 @@ class EndpointService:
             return EndpointResumeResponse(success=True)
 
         try:
-            with self.session.begin_nested():
+            async with self.session.begin_nested():
                 await self.endpoint_repository.update(
                     endpoint=endpoint,
                     data={"status": WebhookEndpointStatus.ACTIVE},
                 )
 
-            self.session.commit()
+            await self.session.commit()
             return EndpointResumeResponse(success=True)
 
         except Exception:
-            self.session.rollback()
+            await self.session.rollback()
             raise
 
     async def rotate_secret(
@@ -245,7 +245,7 @@ class EndpointService:
             raise EndpointNotFoundError()
 
         try:
-            with self.session.begin_nested():
+            async with self.session.begin_nested():
                 next_version = await self.endpoint_secret_repository.get_next_version(
                     endpoint_id=endpoint.id,
                 )
@@ -267,7 +267,7 @@ class EndpointService:
                     version=next_version,
                 )
 
-            self.session.commit()
+            await self.session.commit()
             return EndpointRotateSecretResponse(
                 secret=raw_secret,
                 version=new_secret.version,
@@ -276,11 +276,11 @@ class EndpointService:
             )
 
         except IntegrityError:
-            self.session.rollback()
+            await self.session.rollback()
             raise EndpointSecretConflictError()
 
         except Exception:
-            self.session.rollback()
+            await self.session.rollback()
             raise
 
 

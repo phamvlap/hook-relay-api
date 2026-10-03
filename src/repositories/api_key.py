@@ -2,14 +2,14 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import column, select, update, values
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.context import APIKeyAuthData
 from src.models.api_key import APIKey, APIKeyEnvironment
 
 
 class APIKeyRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
     async def create(
@@ -29,16 +29,17 @@ class APIKeyRepository:
             environment=environment,
         )
         self.session.add(api_key)
-        self.session.flush()
+        await self.session.flush()
         return api_key
 
-    def get_auth_data(self, *, key_id: str) -> APIKeyAuthData | None:
+    async def get_auth_data(self, *, key_id: str) -> APIKeyAuthData | None:
         """Retrieves authentication and verification data for an API key."""
         stmt = select(APIKey).where(
             APIKey.key_id == key_id,
             APIKey.deleted_at.is_(None),
         )
-        api_key = self.session.scalars(stmt).first()
+        result = await self.session.execute(stmt)
+        api_key = result.scalars().first()
         if api_key is None:
             return None
 
@@ -51,7 +52,7 @@ class APIKeyRepository:
             environment=api_key.environment,
         )
 
-    def bulk_update_last_used(self, usages: dict[str, datetime]) -> int:
+    async def bulk_update_last_used(self, usages: dict[str, datetime]) -> int:
         """Bulk updates last_used_at timestamp for multiple API keys in a single query."""
         if not usages:
             return 0
@@ -68,7 +69,7 @@ class APIKeyRepository:
             .values(last_used_at=update_values.c.last_used_at)
         )
 
-        result = self.session.execute(stmt)
-        self.session.flush()
+        result = await self.session.execute(stmt)
+        await self.session.flush()
 
         return result.rowcount  # type: ignore

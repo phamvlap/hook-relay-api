@@ -1,13 +1,26 @@
-from collections.abc import Generator
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator, Generator
+from contextlib import asynccontextmanager, contextmanager
 
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from src.core.config import settings
 
+# Disable asyncpg & SQLAlchemy statement caching to support PgBouncer transaction/statement pooling (e.g. Supabase, AWS RDS Proxy)
+_ASYNCPG_CONNECT_ARGS = {
+    "statement_cache_size": 0,
+    "prepared_statement_cache_size": 0,
+}
+
 # Create a SQLAlchemy engine and session factory for the local database connection
-engine = create_engine(
+engine: Engine = create_engine(
     settings.postgres_dsn_str,
     pool_size=20,
     max_overflow=10,
@@ -15,12 +28,53 @@ engine = create_engine(
     pool_recycle=1800,
 )
 
+# Create a SQLAlchemy async engine and session factory for the local database connection
+async_engine: AsyncEngine = create_async_engine(
+    settings.postgres_async_dsn_str,
+    pool_size=20,
+    max_overflow=10,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    connect_args=_ASYNCPG_CONNECT_ARGS,
+)
+
+# Async engine for Celery tasks, CLI commands, and one-off background processes
+# Uses NullPool so connections are not retained across transient asyncio.run() event loops
+worker_async_engine: AsyncEngine = create_async_engine(
+    settings.postgres_async_dsn_str,
+    poolclass=NullPool,
+    connect_args=_ASYNCPG_CONNECT_ARGS,
+)
+
 # Session factory for creating new sessions
 LocalSession = sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
 
 
+# Session factory for creating new async sessions
+AsyncLocalSession = async_sessionmaker(
+    bind=async_engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+    class_=AsyncSession,
+)
+
+# Session factory for Celery workers & background tasks (fresh connection per session)
+WorkerAsyncLocalSession = async_sessionmaker(
+    bind=worker_async_engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+    class_=AsyncSession,
+)
+
+
 def get_local_session() -> Session:
     return LocalSession()
+
+
+def get_async_local_session() -> AsyncSession:
+    return AsyncLocalSession()
 
 
 @contextmanager
@@ -35,3 +89,17 @@ def get_db_context() -> Generator[Session]:
         raise
     finally:
         session.close()
+
+
+@asynccontextmanager
+async def get_async_db_context() -> AsyncGenerator[AsyncSession]:
+    """Provides a transactional database session context manager for Celery workers & scripts."""
+    session = WorkerAsyncLocalSession()
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()

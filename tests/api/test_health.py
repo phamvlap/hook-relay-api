@@ -47,7 +47,7 @@ async def test_readiness_check_success(
 ):
     """Verifies that /ready returns 200 when both DB and Redis are reachable."""
     # Mock DB session execution of 'SELECT 1'
-    mock_session = MagicMock()
+    mock_session = AsyncMock()
     mock_session.execute.return_value = None
     app.dependency_overrides[get_db] = lambda: mock_session
 
@@ -69,7 +69,7 @@ async def test_readiness_check_success(
     assert "services" in data
     assert data["services"]["database"] == "connected"
     assert data["services"]["redis"] == "connected"
-    mock_session.execute.assert_called_once()
+    mock_session.execute.assert_awaited_once()
     mock_redis.ping.assert_awaited_once()
 
 
@@ -80,7 +80,7 @@ async def test_readiness_check_fails_on_db_disconnect(
     mocker,
 ):
     """Verifies that /ready returns 503 and marks database as disconnected."""
-    mock_session = MagicMock()
+    mock_session = AsyncMock()
     mock_session.execute.side_effect = SQLAlchemyOperationalError(
         statement="SELECT 1",
         params={},
@@ -111,7 +111,7 @@ async def test_readiness_check_fails_on_redis_disconnect(
 ):
     """Verifies that /ready returns 503 and marks redis as disconnected."""
     # DB is reachable
-    mock_session = MagicMock()
+    mock_session = AsyncMock()
     mock_session.execute.return_value = None
     app.dependency_overrides[get_db] = lambda: mock_session
 
@@ -137,7 +137,7 @@ async def test_readiness_check_fails_when_both_disconnect(
     mocker,
 ):
     """Verifies that /ready returns 503 and marks both services as disconnected."""
-    mock_session = MagicMock()
+    mock_session = AsyncMock()
     mock_session.execute.side_effect = SQLAlchemyOperationalError(
         statement="SELECT 1",
         params={},

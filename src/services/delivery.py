@@ -7,7 +7,7 @@ from uuid import UUID
 import httpx
 from celery import Task
 from fastapi import Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.core.retry import RetryPolicy, webhook_delivery_policy
@@ -49,7 +49,7 @@ class DeliveryService:
         event_repository: EventRepository,
         endpoint_repository: EndpointRepository,
         endpoint_secret_repository: EndpointSecretRepository,
-        session: Session,
+        session: AsyncSession,
         httpx_client: httpx.AsyncClient | None = None,
         retry_policy: RetryPolicy | None = None,
     ):
@@ -85,7 +85,7 @@ class DeliveryService:
         event: WebhookEvent = delivery.event
 
         await self.delivery_repository.mark_as_delivering(delivery=delivery)
-        self.session.commit()
+        await self.session.commit()
         await self._sync_event_status(event_id=str(event.id))
 
         payload = {
@@ -264,7 +264,7 @@ class DeliveryService:
             )
 
         finally:
-            self.session.commit()
+            await self.session.commit()
             await self._sync_event_status(event_id=str(event.id))
 
     def _sanitize_request_headers(self, headers: dict[str, str]) -> dict[str, str]:
@@ -298,7 +298,7 @@ class DeliveryService:
     async def _sync_event_status(self, event_id: str) -> None:
         updated = await self.event_repository.resolve_and_update_status(event_id=event_id)
         if updated:
-            self.session.commit()
+            await self.session.commit()
 
     async def _process_retry_or_failure(
         self,
@@ -486,13 +486,13 @@ class DeliveryService:
             raise DeliveryNotEligibleForRetryError("Associated endpoint is inactive or not found.")
 
         try:
-            with self.session.begin_nested():
+            async with self.session.begin_nested():
                 await self.delivery_repository.mark_as_queued_for_retry(delivery=delivery)
                 await self._sync_event_status(event_id=str(delivery.event_id))
 
-            self.session.commit()
+            await self.session.commit()
         except Exception:
-            self.session.rollback()
+            await self.session.rollback()
             raise
 
         task = cast(Task, deliver_webhook_task)

@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.api_key import APIKeyEnvironment
 from src.repositories.api_key import APIKeyRepository
@@ -10,7 +10,7 @@ from src.utils.api_key import generate_api_key
 
 
 class APIKeyService:
-    def __init__(self, *, api_key_repository: APIKeyRepository, session: Session) -> None:
+    def __init__(self, *, api_key_repository: APIKeyRepository, session: AsyncSession) -> None:
         self.api_key_repository = api_key_repository
         self.session = session
 
@@ -25,7 +25,7 @@ class APIKeyService:
         generated_key = generate_api_key(environment)
 
         try:
-            with self.session.begin_nested():
+            async with self.session.begin_nested():
                 api_key = await self.api_key_repository.create(
                     owner_id=owner_id,
                     name=name,
@@ -34,7 +34,7 @@ class APIKeyService:
                     environment=environment,
                 )
 
-            self.session.commit()
+            await self.session.commit()
             return APIKeyCreateResponse(
                 id=api_key.id,
                 owner_id=api_key.owner_id,
@@ -48,9 +48,9 @@ class APIKeyService:
             )
 
         except IntegrityError:
-            self.session.rollback()
+            await self.session.rollback()
             raise
 
         except Exception:
-            self.session.rollback()
+            await self.session.rollback()
             raise

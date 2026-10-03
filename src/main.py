@@ -62,7 +62,7 @@ async def readiness_check(session: SessionDep, response: Response) -> dict[str, 
 
     # 1. Check PostgreSQL database connection
     try:
-        session.execute(text("SELECT 1"))
+        await session.execute(text("SELECT 1"))
     except SQLAlchemyError:
         services["database"] = "disconnected"
         is_ready = False

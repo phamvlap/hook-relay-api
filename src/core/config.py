@@ -102,6 +102,31 @@ class Settings(BaseSettings):
         return str(self.postgres_dsn)
 
     @cached_property
+    def postgres_async_dsn(self) -> PostgresDsn:
+        if self.database_url:
+            raw_url = str(self.database_url)
+            if raw_url.startswith("postgresql+asyncpg://"):
+                return self.database_url
+            if raw_url.startswith("postgresql://"):
+                return PostgresDsn(raw_url.replace("postgresql://", "postgresql+asyncpg://", 1))
+            if raw_url.startswith("postgres://"):
+                return PostgresDsn(raw_url.replace("postgres://", "postgresql+asyncpg://", 1))
+            return self.database_url
+
+        return PostgresDsn.build(
+            scheme="postgresql+asyncpg",
+            username=self.db_username,
+            password=self.db_password.get_secret_value(),
+            host=self.db_host,
+            port=self.db_port,
+            path=self.db_name,
+        )
+
+    @cached_property
+    def postgres_async_dsn_str(self) -> str:
+        return str(self.postgres_async_dsn)
+
+    @cached_property
     def redis_dsn(self) -> RedisDsn:
         if self.redis_url:
             return self.redis_url

@@ -3,7 +3,7 @@ from typing import TypeVar
 
 from fastapi import Request
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.query import Query as SQLAlchemyQuery
 from sqlalchemy.sql import func, select
 
@@ -59,15 +59,17 @@ class PageNumberPaginationResponse[T](BaseModel):
 
 
 async def paginate(
-    session: Session,
+    session: AsyncSession,
     request: Request,
     query: SQLAlchemyQuery,
     params: PageNumberPaginationParams,
 ) -> PageNumberPaginationResponse[object]:
     total_query = select(func.count()).select_from(query.subquery())
-    total = session.execute(total_query).scalar() or 0
+    total_result = await session.execute(total_query)
+    total = total_result.scalar() or 0
 
-    items = session.execute(query.offset(params.offset).limit(params.limit)).scalars().all()
+    items_result = await session.execute(query.offset(params.offset).limit(params.limit))
+    items = items_result.scalars().all()
 
     return PageNumberPaginationResponse.build(
         total=total,

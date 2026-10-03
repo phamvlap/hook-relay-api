@@ -3,7 +3,8 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload, selectinload
 
 from src.models.delivery import (
     WebhookDelivery,
@@ -13,7 +14,7 @@ from src.models.delivery import (
 
 
 class DeliveryRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
     async def create(
@@ -30,12 +31,13 @@ class DeliveryRepository:
             owner_id=owner_id,
             secret_version=secret_version,
         )
-        self.session.flush()
+        self.session.add(delivery)
+        await self.session.flush()
         return delivery
 
     async def bulk_create(self, *, deliveries: list[WebhookDelivery]) -> None:
         self.session.add_all(deliveries)
-        self.session.flush()
+        await self.session.flush()
 
     async def get_by_id(self, *, id: str | UUID, owner_id: str | UUID) -> WebhookDelivery | None:
         stmt = (
@@ -51,7 +53,8 @@ class DeliveryRepository:
                 selectinload(WebhookDelivery.attempts),
             )
         )
-        return self.session.scalars(stmt).first()
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
 
     async def count(
         self,
@@ -79,7 +82,8 @@ class DeliveryRepository:
         if status is not None:
             stmt = stmt.where(WebhookDelivery.status == status)
 
-        return self.session.scalar(stmt) or 0
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
 
     async def list(
         self,
@@ -91,20 +95,23 @@ class DeliveryRepository:
         endpoint_id: str | UUID | None = None,
         status: WebhookDeliveryStatus | None = None,
     ) -> list[WebhookDelivery]:
-        stmt = select(WebhookDelivery).where(
-            WebhookDelivery.owner_id == owner_id,
-            WebhookDelivery.deleted_at.is_(None),
+        stmt = (
+            select(WebhookDelivery)
+            .where(
+                WebhookDelivery.owner_id == owner_id,
+                WebhookDelivery.deleted_at.is_(None),
+            )
+            .options(
+                joinedload(WebhookDelivery.endpoint),
+                joinedload(WebhookDelivery.event),
+            )
         )
 
         if event_id is not None:
-            stmt = stmt.where(WebhookDelivery.event_id == event_id).options(
-                joinedload(WebhookDelivery.event)
-            )
+            stmt = stmt.where(WebhookDelivery.event_id == event_id)
 
         if endpoint_id is not None:
-            stmt = stmt.where(WebhookDelivery.endpoint_id == endpoint_id).options(
-                joinedload(WebhookDelivery.endpoint)
-            )
+            stmt = stmt.where(WebhookDelivery.endpoint_id == endpoint_id)
 
         if status is not None:
             stmt = stmt.where(WebhookDelivery.status == status)
@@ -117,7 +124,8 @@ class DeliveryRepository:
         if limit is not None:
             stmt = stmt.limit(limit)
 
-        return list(self.session.scalars(stmt).all())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def update(
         self,
@@ -128,13 +136,13 @@ class DeliveryRepository:
         for key, value in data.items():
             setattr(delivery, key, value)
 
-        self.session.flush()
+        await self.session.flush()
         return delivery
 
     async def mark_as_delivering(self, *, delivery: WebhookDelivery) -> WebhookDelivery:
         delivery.status = WebhookDeliveryStatus.DELIVERING
 
-        self.session.flush()
+        await self.session.flush()
 
         return delivery
 
@@ -154,7 +162,7 @@ class DeliveryRepository:
         if response_body is not None:
             delivery.response_body = response_body
 
-        self.session.flush()
+        await self.session.flush()
 
         return delivery
 
@@ -176,7 +184,7 @@ class DeliveryRepository:
         if response_body is not None:
             delivery.response_body = response_body
 
-        self.session.flush()
+        await self.session.flush()
 
         return delivery
 
@@ -202,7 +210,7 @@ class DeliveryRepository:
         if response_body is not None:
             delivery.response_body = response_body
 
-        self.session.flush()
+        await self.session.flush()
 
         return delivery
 
@@ -230,7 +238,7 @@ class DeliveryRepository:
         if response_body is not None:
             delivery.response_body = response_body
 
-        self.session.flush()
+        await self.session.flush()
 
         return delivery
 
@@ -254,7 +262,8 @@ class DeliveryRepository:
             )
             .with_for_update()
         )
-        return self.session.scalars(stmt).first()
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
 
     async def mark_as_queued_for_retry(self, *, delivery: WebhookDelivery) -> WebhookDelivery:
         delivery.status = WebhookDeliveryStatus.QUEUED
@@ -267,7 +276,7 @@ class DeliveryRepository:
         delivery.duration_ms = None
         delivery.delivered_at = None
 
-        self.session.flush()
+        await self.session.flush()
 
         return delivery
 
@@ -294,11 +303,12 @@ class DeliveryRepository:
             )
             .with_for_update()
         )
-        return self.session.scalars(stmt).first()
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
 
 
 class DeliveryAttemptRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
     async def create(
@@ -328,7 +338,7 @@ class DeliveryAttemptRepository:
             completed_at=completed_at,
         )
         self.session.add(attempt)
-        self.session.flush()
+        await self.session.flush()
         return attempt
 
     async def count_by_delivery_id(self, *, delivery_id: str | UUID) -> int:
@@ -340,7 +350,8 @@ class DeliveryAttemptRepository:
                 WebhookDeliveryAttempt.deleted_at.is_(None),
             )
         )
-        return self.session.scalar(stmt) or 0
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
 
     async def list_by_delivery_id(
         self,
@@ -362,4 +373,5 @@ class DeliveryAttemptRepository:
 
         stmt = stmt.order_by(WebhookDeliveryAttempt.attempt_number.asc())
 
-        return list(self.session.scalars(stmt).all())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

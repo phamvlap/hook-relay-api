@@ -1,11 +1,11 @@
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.pagination import PageNumberPaginationParams
-from src.database.session import LocalSession
+from src.database.session import AsyncLocalSession, LocalSession
 from src.repositories.delivery import DeliveryAttemptRepository, DeliveryRepository
 from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.repositories.event import EventRepository
@@ -14,18 +14,18 @@ from src.services.endpoint import EndpointService
 from src.services.event import EventService
 
 
-def get_db() -> Generator[Session]:
-    session: Session = LocalSession()
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    session: AsyncSession = AsyncLocalSession()
     try:
         yield session
     except Exception:
-        session.rollback()
+        await session.rollback()
         raise
     finally:
-        session.close()
+        await session.close()
 
 
-SessionDep = Annotated[Session, Depends(get_db)]
+SessionDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 def get_endpoint_repository(session: SessionDep) -> EndpointRepository:

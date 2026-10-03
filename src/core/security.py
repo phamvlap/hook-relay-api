@@ -1,6 +1,5 @@
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from starlette.concurrency import run_in_threadpool
 
 from src.api.deps import SessionDep
 from src.core.context import APIKeyAuthData, AuthContext
@@ -48,7 +47,7 @@ async def get_auth_context_from_api_key(
         # 4. Fallback to database via repository
         if cached_api_key is None:
             repo = APIKeyRepository(session)
-            cached_api_key = await run_in_threadpool(repo.get_auth_data, key_id=parsed_key.key_id)
+            cached_api_key = await repo.get_auth_data(key_id=parsed_key.key_id)
 
             if cached_api_key is not None:
                 await auth_cache.set_l2(parsed_key.key_id, cached_api_key)

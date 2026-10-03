@@ -4,7 +4,7 @@ from uuid import UUID
 from celery import Task
 from fastapi import Request
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.exceptions.event import EventConflictError, EventNotFoundError
@@ -30,7 +30,7 @@ class EventService:
         endpoint_repository: EndpointRepository,
         delivery_repository: DeliveryRepository,
         endpoint_secret_repository: EndpointSecretRepository,
-        session: Session,
+        session: AsyncSession,
     ) -> None:
         self.event_repository = event_repository
         self.endpoint_repository = endpoint_repository
@@ -57,7 +57,7 @@ class EventService:
         deliveries: list[WebhookDelivery] = []
 
         try:
-            with self.session.begin_nested():
+            async with self.session.begin_nested():
                 # Get all active endpoints for the owner
                 endpoints = await self.endpoint_repository.list(
                     owner_id=owner_id,
@@ -96,10 +96,10 @@ class EventService:
                     await self.delivery_repository.bulk_create(deliveries=deliveries)
 
             # Commit the transaction
-            self.session.commit()
+            await self.session.commit()
 
         except IntegrityError:
-            self.session.rollback()
+            await self.session.rollback()
 
             # If concurrently creating an event with the same idempotency key, check if it already exists
             if idempotency_key:
@@ -113,7 +113,7 @@ class EventService:
             raise EventConflictError()
 
         except Exception:
-            self.session.rollback()
+            await self.session.rollback()
             raise
 
         if deliveries:
