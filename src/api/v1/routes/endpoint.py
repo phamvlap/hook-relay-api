@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from src.api.deps import get_endpoint_service, get_page_number_pagination_params
 from src.core.context import AuthContext
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
+from src.core.rate_limit.limiter import RateLimitReadsDep, RateLimitSensitiveDep, RateLimitWritesDep
 from src.core.security import get_auth_context_from_api_key
 from src.models.endpoint import WebhookEndpointStatus
 from src.schemas.endpoint import (
@@ -30,6 +31,7 @@ async def get_endpoints(
     page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitReadsDep,
     status: WebhookEndpointStatus | None = None,
 ) -> PageNumberPaginationResponse[EndpointListResponse]:
     """
@@ -48,6 +50,7 @@ async def create_endpoint(
     data: EndpointCreateRequest,
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitWritesDep,
 ) -> EndpointCreateResponse:
     """
     Create a new endpoint.
@@ -60,6 +63,7 @@ async def get_endpoint(
     endpoint_id: UUID,
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitReadsDep,
 ) -> EndpointRetrieveResponse:
     """
     Get an endpoint by ID.
@@ -73,6 +77,7 @@ async def update_endpoint(
     data: EndpointUpdateRequest,
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitWritesDep,
 ) -> EndpointUpdateResponse:
     """
     Update an endpoint by ID.
@@ -85,6 +90,7 @@ async def delete_endpoint(
     endpoint_id: UUID,
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitWritesDep,
 ) -> Response:
     """
     Delete an endpoint by ID.
@@ -98,6 +104,7 @@ async def pause_endpoint(
     endpoint_id: UUID,
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitWritesDep,
 ) -> EndpointPauseResponse:
     """
     Pause an endpoint by ID.
@@ -110,6 +117,7 @@ async def resume_endpoint(
     endpoint_id: UUID,
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitWritesDep,
 ) -> EndpointResumeResponse:
     """
     Resume an endpoint by ID.
@@ -122,6 +130,7 @@ async def rotate_endpoint_secret(
     endpoint_id: UUID,
     endpoint_service: Annotated[EndpointService, Depends(get_endpoint_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitSensitiveDep,
 ) -> EndpointRotateSecretResponse:
     """
     Rotate signing secret for an endpoint by ID.

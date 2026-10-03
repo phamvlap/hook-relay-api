@@ -82,3 +82,4 @@ class TestSettingsValidation:
             in settings.postgres_dsn_str
         )
         assert "redis://redis.example.com:6379/2" in settings.redis_dsn_str
+        assert settings.rate_limit_enabled is True

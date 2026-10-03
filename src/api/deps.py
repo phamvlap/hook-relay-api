@@ -111,3 +111,21 @@ def get_page_number_pagination_params(
     page_size: int = Query(10, ge=1, le=100),
 ) -> PageNumberPaginationParams:
     return PageNumberPaginationParams(page=page, page_size=page_size)
+
+
+# Rate limit dependencies
+from src.core.rate_limit.limiter import (
+    RateLimitIngestDep,
+    RateLimitPublicDep,
+    RateLimitReadsDep,
+    RateLimitSensitiveDep,
+    RateLimitWritesDep,
+)
+
+__all__ = [
+    "RateLimitIngestDep",
+    "RateLimitPublicDep",
+    "RateLimitReadsDep",
+    "RateLimitSensitiveDep",
+    "RateLimitWritesDep",
+]

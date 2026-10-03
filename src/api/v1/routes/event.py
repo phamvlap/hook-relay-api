@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, Request, status
 from src.api.deps import get_delivery_service, get_event_service, get_page_number_pagination_params
 from src.core.context import AuthContext
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
+from src.core.rate_limit.limiter import RateLimitIngestDep, RateLimitReadsDep
 from src.core.security import get_auth_context_from_api_key
 from src.models.event import WebhookEventStatus
 from src.schemas.delivery import DeliveryListInEvent
@@ -26,6 +27,7 @@ async def create_event(
     data: EventCreateRequest,
     event_service: Annotated[EventService, Depends(get_event_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitIngestDep,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> EventCreateResponse:
     """
@@ -44,6 +46,7 @@ async def list_events(
     page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
     event_service: Annotated[EventService, Depends(get_event_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitReadsDep,
     status: WebhookEventStatus | None = None,
 ) -> PageNumberPaginationResponse[EventListResponse]:
     """
@@ -62,6 +65,7 @@ async def retrieve_event(
     event_id: UUID,
     event_service: Annotated[EventService, Depends(get_event_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitReadsDep,
 ) -> EventRetrieveResponse:
     """
     Retrieve an event by its ID.
@@ -79,6 +83,7 @@ async def list_deliveries_in_event(
     page_params: Annotated[PageNumberPaginationParams, Depends(get_page_number_pagination_params)],
     delivery_service: Annotated[DeliveryService, Depends(get_delivery_service)],
     auth: Annotated[AuthContext, Depends(get_auth_context_from_api_key)],
+    _rate_limit: RateLimitReadsDep,
 ) -> PageNumberPaginationResponse[DeliveryListInEvent]:
     """
     List all deliveries associated with a specific event.

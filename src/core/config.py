@@ -59,6 +59,12 @@ class Settings(BaseSettings):
         description="High-entropy encryption key for encrypting endpoint secrets",
     )
 
+    # Rate limiting configuration
+    rate_limit_enabled: bool = Field(
+        default=True,
+        description="Enable or disable rate limiting globally",
+    )
+
     @field_validator("api_key_pepper")
     def validate_api_key_pepper(cls, value: SecretStr) -> SecretStr:
         raw_val = value.get_secret_value().strip()

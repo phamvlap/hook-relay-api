@@ -13,7 +13,10 @@ from uuid import uuid4
 import pytest
 from httpx import AsyncClient
 
+from src.models.api_key import APIKeyEnvironment
 from src.models.endpoint import WebhookEndpointStatus
+from src.repositories.api_key import APIKeyRepository
+from src.services.api_key import APIKeyService
 
 
 # ---------------------------------------------------------------------------
@@ -33,6 +36,30 @@ async def test_endpoints_unauthorized_without_auth(async_client: AsyncClient):
     assert (
         await async_client.post(f"/api/v1/endpoints/{random_id}/rotate-secret")
     ).status_code == 401
+
+
+@pytest.mark.api
+async def test_bearer_auth_real_token_populates_auth_context(
+    test_owner,
+    db_session,
+    async_client: AsyncClient,
+):
+    """Verifies that authenticating with a real Bearer API key executes get_auth_context_from_api_key,
+    populates request.state.auth, and allows the request through with 200.
+    """
+    api_key_repo = APIKeyRepository(db_session)
+    api_key_service = APIKeyService(api_key_repository=api_key_repo, session=db_session)
+    created_key = await api_key_service.create(
+        owner_id=test_owner.id,
+        name="Real Bearer Key",
+        environment=APIKeyEnvironment.TEST,
+    )
+
+    headers = {"Authorization": f"Bearer {created_key.api_key}"}
+    response = await async_client.get("/api/v1/endpoints", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
 
 
 # ---------------------------------------------------------------------------

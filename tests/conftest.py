@@ -19,7 +19,7 @@ if _env_test_file.exists():
 os.environ.setdefault("ENVIRONMENT", "test")
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, text
@@ -164,7 +164,11 @@ def mock_auth_context() -> AuthContext:
 @pytest.fixture
 def authenticated_client(app: FastAPI, mock_auth_context: AuthContext) -> FastAPI:
     """Bypasses API key authentication by overriding get_auth_context_from_api_key."""
-    app.dependency_overrides[get_auth_context_from_api_key] = lambda: mock_auth_context
+    def _override(request: Request) -> AuthContext:
+        request.state.auth = mock_auth_context
+        return mock_auth_context
+
+    app.dependency_overrides[get_auth_context_from_api_key] = _override
     return app
 
 
@@ -186,7 +190,12 @@ def test_owner_auth(app: FastAPI, test_owner: Any) -> AuthContext:
         key_id="test_key_persisted_owner",
         environment=APIKeyEnvironment.TEST,
     )
-    app.dependency_overrides[get_auth_context_from_api_key] = lambda: auth_ctx
+
+    def _override(request: Request) -> AuthContext:
+        request.state.auth = auth_ctx
+        return auth_ctx
+
+    app.dependency_overrides[get_auth_context_from_api_key] = _override
     return auth_ctx
 
 
@@ -202,8 +211,35 @@ def mock_external_services(mocker):
     # Mock Redis client
     mock_redis = AsyncMock()
     mock_redis.ping = AsyncMock(return_value=True)
+    mock_redis.script_load = AsyncMock(return_value="mock_script_sha")
+    mock_redis.evalsha = AsyncMock(return_value=[1, "100", "0.0", 1800000000])
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.setex = AsyncMock(return_value=True)
+    mock_redis.hset = AsyncMock(return_value=1)
+
+    # Comprehensive patch: definition site, connection pool, and all consumer modules
     mocker.patch(
         "src.infrastructure.redis.client.get_async_redis_client",
+        return_value=mock_redis,
+    )
+    mocker.patch(
+        "src.infrastructure.redis.client.get_async_redis_pool",
+        return_value=MagicMock(),
+    )
+    # mocker.patch(
+    #     "src.core.rate_limit.limiter.get_async_redis_client",
+    #     return_value=mock_redis,
+    # )
+    mocker.patch(
+        "src.core.security.get_async_redis_client",
+        return_value=mock_redis,
+    )
+    mocker.patch(
+        "src.main.get_async_redis_client",
+        return_value=mock_redis,
+    )
+    mocker.patch(
+        "src.infrastructure.redis.auth_cache.get_async_redis_client",
         return_value=mock_redis,
     )
     mocker.patch(

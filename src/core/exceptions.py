@@ -32,3 +32,22 @@ class UnauthorizedError(AppError):
 
     def __init__(self, message: str = "Invalid authentication credentials"):
         super().__init__(message)
+
+
+class RateLimitExceededError(AppError):
+    """Exception raised when a client exceeds the allowed rate limit."""
+
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded. Please retry later.",
+        *,
+        retry_after: float = 1.0,
+        limit: int = 100,
+        remaining: int = 0,
+        reset: int = 1,
+    ):
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.limit = limit
+        self.remaining = remaining
+        self.reset = reset

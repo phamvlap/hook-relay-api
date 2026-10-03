@@ -9,15 +9,23 @@ from src.core.exceptions import (
     AppError,
     ConflictError,
     NotFoundError,
+    RateLimitExceededError,
     UnauthorizedError,
     ValidationError,
 )
 
 
-def _error_response(status_code: int, message: str, details: dict[str, Any] | None = None):
+def _error_response(
+    status_code: int,
+    message: str,
+    *,
+    details: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"error": {"message": message, "details": details or {}}},
+        headers=headers,
     )
 
 
@@ -41,6 +49,26 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(UnauthorizedError)
     async def unauthorized_exception_handler(request: Request, exc: UnauthorizedError):
         return _error_response(status.HTTP_401_UNAUTHORIZED, exc.message)
+
+    @app.exception_handler(RateLimitExceededError)
+    async def rate_limit_exception_handler(request: Request, exc: RateLimitExceededError):
+        headers = {
+            "Retry-After": str(max(1, int(exc.retry_after) + 1)),
+            "X-RateLimit-Limit": str(exc.limit),
+            "X-RateLimit-Remaining": str(exc.remaining),
+            "X-RateLimit-Reset": str(exc.reset),
+        }
+        return _error_response(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            exc.message,
+            details={
+                "retry_after": round(exc.retry_after, 2),
+                "limit": exc.limit,
+                "remaining": exc.remaining,
+                "reset": exc.reset,
+            },
+            headers=headers,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
