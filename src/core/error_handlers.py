@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request, status
@@ -5,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.core.client_ip import get_client_ip
 from src.core.exceptions import (
     AppError,
     ConflictError,
@@ -13,6 +15,8 @@ from src.core.exceptions import (
     UnauthorizedError,
     ValidationError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _error_response(
@@ -86,7 +90,42 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(Exception)
-    async def unhandled_exception_handler(request: Request, exc: Exception):
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        try:
+            method = getattr(request, "method", "UNKNOWN")
+            url = getattr(request, "url", None)
+            path = getattr(url, "path", "UNKNOWN")
+
+            try:
+                client_ip = get_client_ip(request)
+            except (AttributeError, TypeError, ValueError):
+                client = getattr(request, "client", None)
+                client_ip = getattr(client, "host", "unknown") or "unknown"
+
+            state = getattr(request, "state", None)
+            auth = getattr(state, "auth", None)
+            owner_id = str(getattr(auth, "owner_id", None)) if auth else None
+
+            extra: dict[str, Any] = {
+                "http_method": method,
+                "http_path": path,
+                "client_ip": client_ip,
+                "error_type": type(exc).__name__,
+            }
+            if owner_id:
+                extra["owner_id"] = owner_id
+
+            logger.exception(
+                "Unhandled exception occurred while processing %s %s: %s",
+                method,
+                path,
+                exc or type(exc).__name__,
+                extra=extra,
+            )
+        except Exception:
+            # Fallback to guarantee exception logging even if request inspection fails
+            logger.exception("Unhandled exception occurred: %s", exc)
+
         return _error_response(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             "An unexpected error occurred.",
