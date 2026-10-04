@@ -1,8 +1,16 @@
 from functools import cached_property, lru_cache
-from typing import Literal
 
 from pydantic import Field, PostgresDsn, RedisDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from src.core.enum import BaseStrEnum
+
+
+class Environment(BaseStrEnum):
+    DEVELOPMENT = "development"
+    STAGING = "staging"
+    PRODUCTION = "production"
+    TEST = "test"
 
 
 class Settings(BaseSettings):
@@ -15,7 +23,23 @@ class Settings(BaseSettings):
     )
 
     # Application configuration
-    environment: Literal["development", "staging", "production", "test"] = "development"
+    environment: Environment = Environment.DEVELOPMENT
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == Environment.PRODUCTION
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment == Environment.DEVELOPMENT
+
+    @property
+    def is_staging(self) -> bool:
+        return self.environment == Environment.STAGING
+
+    @property
+    def is_test(self) -> bool:
+        return self.environment == Environment.TEST
 
     allowed_hosts: str = Field(
         default="*",

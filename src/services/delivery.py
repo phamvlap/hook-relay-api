@@ -3,14 +3,17 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
+import httpcore
 import httpx
 import orjson
 from celery import Task
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.http_client import get_safe_http_client
 from src.core.pagination import PageNumberPaginationParams, PageNumberPaginationResponse
 from src.core.retry import RetryPolicy, webhook_delivery_policy
+from src.core.ssrf import SSRFSecurityError
 from src.exceptions.delivery import DeliveryNotEligibleForRetryError, DeliveryNotFoundError
 from src.models.delivery import WebhookDelivery, WebhookDeliveryStatus
 from src.models.endpoint import (
@@ -33,14 +36,6 @@ from src.tasks.webhook import deliver_webhook_task
 from src.utils.endpoint import EndpointSecretCrypto
 
 
-def _create_httpx_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        timeout=httpx.Timeout(10.0, connect=5.0, read=10.0, write=10.0, pool=None),
-        follow_redirects=True,
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-    )
-
-
 class DeliveryService:
     def __init__(
         self,
@@ -59,11 +54,7 @@ class DeliveryService:
         self.endpoint_repository = endpoint_repository
         self.endpoint_secret_repository = endpoint_secret_repository
         self.session = session
-        self.httpx_client = httpx_client or httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=5.0, read=10.0, write=10.0, pool=None),
-            follow_redirects=False,
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-        )
+        self.httpx_client = httpx_client or get_safe_http_client()
         self.retry_policy = retry_policy or webhook_delivery_policy
 
     async def deliver(self, *, delivery_id: str | UUID) -> None:
@@ -140,17 +131,16 @@ class DeliveryService:
         sanitized_headers = self._sanitize_request_headers(headers)
 
         try:
-            async with self.httpx_client as client:
-                response = await client.post(
-                    endpoint.url,
-                    content=payload_bytes,
-                    headers=headers,
-                )
+            response = await self.httpx_client.post(
+                endpoint.url,
+                content=payload_bytes,
+                headers=headers,
+            )
 
             completed_at = datetime.now(tz=UTC)
             duration_ms = int((time.monotonic() - start_time) * 1000)
             response_body = self._get_response_body(response)
-            response_headers = dict(response.headers)
+            response_headers = self._sanitize_response_headers(dict(response.headers))
 
             if self._is_successful_status(response.status_code):
                 await self.delivery_attempt_repository.create(
@@ -221,6 +211,28 @@ class DeliveryService:
                     duration_ms=duration_ms,
                 )
 
+        except (SSRFSecurityError, httpcore.ConnectError) as exc:
+            completed_at = datetime.now(tz=UTC)
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            error_message = f"SSRF Blocked or Connection Error: {exc!s}"
+            await self.delivery_attempt_repository.create(
+                delivery_id=delivery.id,
+                attempt_number=current_attempt_num,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+                status_code=None,
+                request_headers=sanitized_headers,
+                error_message=error_message,
+            )
+            # Permanent failure: Do NOT retry endpoints that hit private/blocked networks
+            await self.delivery_repository.mark_as_failed(
+                delivery=delivery,
+                status_code=None,
+                error_message=error_message,
+                duration_ms=duration_ms,
+            )
+
         except httpx.InvalidURL as exc:
             completed_at = datetime.now(tz=UTC)
             duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -274,25 +286,38 @@ class DeliveryService:
                 sanitized[key] = "[REDACTED]"
         return sanitized
 
+    def _sanitize_response_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        sanitized = dict(headers)
+        for key in list(sanitized.keys()):
+            if key.lower() in (
+                "set-cookie",
+                "authorization",
+                "proxy-authorization",
+                "x-secret",
+                "server",
+            ):
+                sanitized[key] = "[REDACTED]"
+        return sanitized
+
     def _is_successful_status(self, status_code: int) -> bool:
         return 200 <= status_code < 300
 
     def _get_response_body(
         self,
         response: httpx.Response,
-        max_bytes: int = 65536,
+        max_bytes: int = 4096,
     ) -> dict[str, Any] | None:
         try:
             if len(response.content) > max_bytes:
                 return {
                     "_truncated": True,
-                    "preview": response.text[:1024],
+                    "preview": response.text[:512],
                     "content_length": len(response.content),
                 }
             return response.json()
         except (TypeError, ValueError):
             if response.text:
-                return {"raw": response.text[:1024]}
+                return {"raw": response.text[:512]}
             return None
 
     async def _sync_event_status(self, event_id: str) -> None:

@@ -51,7 +51,7 @@ def db_engine():
     Protects against running tests against remote/production databases by default.
     """
     # Safety guard: Prevent accidental test execution against remote cloud DBs
-    if settings.environment == "production" and os.getenv("ALLOW_REMOTE_TEST_DB") != "true":
+    if settings.is_production and os.getenv("ALLOW_REMOTE_TEST_DB") != "true":
         raise RuntimeError(
             "SAFETY GUARD: Attempted to run database tests against a remote production database!\n"
             f"Current DSN points to: {settings.db_host} (database: {settings.db_name})\n"
