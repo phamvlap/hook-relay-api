@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -141,6 +142,38 @@ class EndpointSecretRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
+
+    async def get_active_secrets_by_endpoint_ids(
+        self,
+        *,
+        endpoint_ids: Sequence[str | UUID],
+    ) -> dict[UUID, WebhookEndpointSecret]:
+        """Fetch active secrets for multiple endpoints in a single batch query.
+
+        Returns a dictionary mapping endpoint_id (both as UUID and str)
+        to its highest-version active WebhookEndpointSecret, eliminating N+1 queries.
+        """
+        if not endpoint_ids:
+            return {}
+
+        stmt = (
+            select(WebhookEndpointSecret)
+            .where(
+                WebhookEndpointSecret.endpoint_id.in_(endpoint_ids),
+                WebhookEndpointSecret.status == WebhookEndpointSecretStatus.ACTIVE,
+                WebhookEndpointSecret.deleted_at.is_(None),
+            )
+            .order_by(
+                WebhookEndpointSecret.endpoint_id,
+                WebhookEndpointSecret.version.desc(),
+            )
+        )
+        result = await self.session.execute(stmt)
+        secrets_by_endpoint: dict[UUID, WebhookEndpointSecret] = {}
+        for secret in result.scalars().all():
+            if secret.endpoint_id not in secrets_by_endpoint:
+                secrets_by_endpoint[secret.endpoint_id] = secret
+        return secrets_by_endpoint
 
     async def get_by_version(
         self,

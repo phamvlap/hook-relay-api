@@ -78,11 +78,16 @@ class EventService:
                 )
 
                 if endpoints:
+                    endpoint_ids = [endpoint.id for endpoint in endpoints]
+                    active_secrets = (
+                        await self.endpoint_secret_repository.get_active_secrets_by_endpoint_ids(
+                            endpoint_ids=endpoint_ids,
+                        )
+                    )
+
                     # Create a delivery for each active endpoint
                     for endpoint in endpoints:
-                        active_secret = await self.endpoint_secret_repository.get_active_secret(
-                            endpoint_id=endpoint.id,
-                        )
+                        active_secret = active_secrets.get(endpoint.id)
                         secret_version = active_secret.version if active_secret else 1
 
                         delivery = WebhookDelivery(
