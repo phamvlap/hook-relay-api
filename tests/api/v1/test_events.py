@@ -13,10 +13,16 @@ Covers:
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI, Request
 from httpx import AsyncClient
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.context import AuthContext
+from src.core.security import get_auth_context_from_api_key
+from src.models.api_key import APIKeyEnvironment
 from src.models.event import WebhookEventStatus
+from src.models.owner import Owner
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +183,109 @@ async def test_create_event_idempotency_key_deduplication(
 
     assert event_1["id"] == event_2["id"]
     assert event_2["event_type"] == "payment.authorized"
+
+
+@pytest.mark.api
+async def test_create_event_cross_tenant_same_idempotency_key_allowed(
+    app: FastAPI,
+    test_owner: Owner,
+    db_session: AsyncSession,
+    async_client: AsyncClient,
+):
+    """Verifies that two different tenants can safely use the exact same Idempotency-Key
+    without collision, 409 Conflict, or cross-tenant data leakage.
+    """
+    # 1. Setup Tenant B (second owner)
+    owner_b = Owner()
+    db_session.add(owner_b)
+    await db_session.flush()
+
+    auth_a = AuthContext(
+        api_key_id=uuid4(),
+        owner_id=test_owner.id,
+        key_id="test_key_owner_a",
+        environment=APIKeyEnvironment.TEST,
+    )
+    auth_b = AuthContext(
+        api_key_id=uuid4(),
+        owner_id=owner_b.id,
+        key_id="test_key_owner_b",
+        environment=APIKeyEnvironment.TEST,
+    )
+
+    current_auth = [auth_a]
+
+    def _auth_override(request: Request) -> AuthContext:
+        request.state.auth = current_auth[0]
+        return current_auth[0]
+
+    app.dependency_overrides[get_auth_context_from_api_key] = _auth_override
+
+    shared_idempotency_key = "cross_tenant_shared_order_tx_999"
+
+    # 2. Tenant A creates event with shared idempotency key
+    payload_a = {
+        "event_type": "tenant_a.order.completed",
+        "payload": {"tenant": "A", "order_id": "1001"},
+    }
+    res_a = await async_client.post(
+        "/api/v1/events",
+        json=payload_a,
+        headers={"Idempotency-Key": shared_idempotency_key},
+    )
+    assert res_a.status_code == 202
+    event_a = res_a.json()
+    assert event_a["event_type"] == "tenant_a.order.completed"
+
+    # 3. Tenant B creates event with the EXACT SAME shared idempotency key
+    current_auth[0] = auth_b
+    payload_b = {
+        "event_type": "tenant_b.order.completed",
+        "payload": {"tenant": "B", "order_id": "2002"},
+    }
+    res_b = await async_client.post(
+        "/api/v1/events",
+        json=payload_b,
+        headers={"Idempotency-Key": shared_idempotency_key},
+    )
+    # Must succeed (202), NOT 409 Conflict
+    assert res_b.status_code == 202
+    event_b = res_b.json()
+    assert event_b["event_type"] == "tenant_b.order.completed"
+
+    # Both events must have distinct IDs
+    assert event_a["id"] != event_b["id"]
+
+    # 4. Subsequent idempotent call by Tenant A returns Tenant A's event
+    current_auth[0] = auth_a
+    repeat_a = await async_client.post(
+        "/api/v1/events",
+        json={"event_type": "ignored.type", "payload": {}},
+        headers={"Idempotency-Key": shared_idempotency_key},
+    )
+    assert repeat_a.status_code == 202
+    assert repeat_a.json()["id"] == event_a["id"]
+    assert repeat_a.json()["event_type"] == "tenant_a.order.completed"
+
+    # 5. Subsequent idempotent call by Tenant B returns Tenant B's event
+    current_auth[0] = auth_b
+    repeat_b = await async_client.post(
+        "/api/v1/events",
+        json={"event_type": "ignored.type", "payload": {}},
+        headers={"Idempotency-Key": shared_idempotency_key},
+    )
+    assert repeat_b.status_code == 202
+    assert repeat_b.json()["id"] == event_b["id"]
+    assert repeat_b.json()["event_type"] == "tenant_b.order.completed"
+
+    # 6. Cross-tenant access isolation: Tenant B cannot access Tenant A's event (404)
+    access_a_by_b = await async_client.get(f"/api/v1/events/{event_a['id']}")
+    assert access_a_by_b.status_code == 404
+
+    # Tenant A cannot access Tenant B's event (404)
+    current_auth[0] = auth_a
+    access_b_by_a = await async_client.get(f"/api/v1/events/{event_b['id']}")
+    assert access_b_by_a.status_code == 404
 
 
 # ---------------------------------------------------------------------------

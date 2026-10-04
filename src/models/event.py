@@ -47,7 +47,8 @@ class WebhookEvent(BaseModel):
 
     __table_args__ = (
         Index(
-            "uq_webhook_events_idempotency_key",
+            "uq_webhook_events_owner_id_idempotency_key",
+            "owner_id",
             "idempotency_key",
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL AND deleted_at IS NULL"),
