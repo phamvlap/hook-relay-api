@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request, Response
 
+from src.core.client_ip import get_client_ip
 from src.core.config import settings
 from src.core.context import AuthContext
 from src.core.exceptions import RateLimitExceededError
@@ -38,15 +39,8 @@ def default_key_extractor(request: Request, tier_name: str) -> str:
         except InvalidAPIKeyFormatError:
             pass
 
-    # 3. Client IP fallback
-    forwarded: str | None = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        client_ip = forwarded.split(",")[0].strip()
-    elif request.client and request.client.host:
-        client_ip = request.client.host
-    else:
-        client_ip = "unknown"
-
+    # 3. Secure Client IP fallback (validated against trusted proxies)
+    client_ip = get_client_ip(request)
     return f"ip:{client_ip}:{tier_name}"
 
 

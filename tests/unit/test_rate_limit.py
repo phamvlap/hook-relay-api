@@ -247,6 +247,18 @@ class TestKeyExtractor:
         key = default_key_extractor(mock_request, tier_name=RateLimitTierName.READS)
         assert key == f"ip:203.0.113.195:{RateLimitTierName.READS}"
 
+    def test_extract_key_from_untrusted_peer_ignores_x_forwarded_for(self):
+        mock_request = MagicMock(spec=Request)
+        mock_request.state = MagicMock()
+        mock_request.state.auth = None
+        mock_request.headers.get.side_effect = lambda h: (
+            "1.1.1.1, 8.8.8.8" if h == "X-Forwarded-For" else None
+        )
+        mock_request.client.host = "198.51.100.22"
+
+        key = default_key_extractor(mock_request, tier_name=RateLimitTierName.PUBLIC)
+        assert key == f"ip:198.51.100.22:{RateLimitTierName.PUBLIC}"
+
 
 @pytest.mark.unit
 class TestRateLimiterDependency:

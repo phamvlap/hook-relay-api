@@ -1,3 +1,4 @@
+import ipaddress
 from functools import cached_property, lru_cache
 
 from pydantic import Field, PostgresDsn, RedisDsn, SecretStr, field_validator
@@ -48,6 +49,10 @@ class Settings(BaseSettings):
     cors_origins: str = Field(
         default="*",
         description="Comma-separated list of allowed origins for CORS",
+    )
+    trusted_proxies: str = Field(
+        default="127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+        description="Comma-separated list of trusted proxy IPs or CIDR networks for reverse-proxy client IP extraction",
     )
 
     # PostgreSQL database configuration
@@ -186,6 +191,20 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
         return origins
+
+    @cached_property
+    def trusted_proxy_networks(self) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+        """Parsed list of trusted IP networks for secure client IP extraction."""
+        networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+        for raw in self.trusted_proxies.split(","):
+            raw_clean = raw.strip()
+            if not raw_clean:
+                continue
+            try:
+                networks.append(ipaddress.ip_network(raw_clean, strict=False))
+            except ValueError:
+                continue
+        return networks
 
 
 @lru_cache(maxsize=1)
