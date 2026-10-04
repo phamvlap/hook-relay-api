@@ -1,10 +1,10 @@
-from typing import Any, cast
+import asyncio
+from typing import Any
 
-from celery import Task
-from celery.exceptions import OperationalError as CeleryOperationalError
-from celery.exceptions import TimeoutError as CeleryTimeoutError
+from celery.exceptions import CeleryError
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from kombu.exceptions import OperationalError as KombuOperationalError
 from redis.exceptions import RedisError
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -16,7 +16,7 @@ from src.core.config import settings
 from src.core.error_handlers import register_exception_handlers
 from src.infrastructure.redis.client import get_async_redis_client
 from src.lifespan import lifespan
-from src.tasks.general import health_check_task
+from src.tasks.celery_app import celery_app
 
 app = FastAPI(
     title="Hook Relay API",
@@ -93,19 +93,44 @@ async def readiness_check(session: SessionDep, response: Response) -> dict[str, 
     }
 
 
+def _ping_celery_workers(timeout: float = 1.0) -> list[dict[str, Any]]:
+    """Broadcasts a control ping to active Celery workers without queuing tasks."""
+    return celery_app.control.ping(timeout=timeout) or []
+
+
 @app.get("/celery-health", tags=["Health"])
-def celery_health_check() -> dict[str, str | None]:
-    task = cast(Task, health_check_task)
+async def celery_health_check(response: Response) -> dict[str, Any]:
+    """Non-blocking health check for the Celery subsystem.
+
+    Verifies broker connectivity and worker presence via broadcast control ping
+    without polluting the task queue or blocking application threads.
+    """
+    error_message: str | None = None
+    worker_nodes: list[str] = []
+
     try:
-        result = task.delay().get(timeout=2)
-        error_message = None
-    except (CeleryTimeoutError, CeleryOperationalError) as e:
-        result = "unhealthy"
-        error_message = str(e)
+        worker_responses = await asyncio.to_thread(_ping_celery_workers, timeout=1.0)
+        for resp in worker_responses:
+            for node, status_dict in resp.items():
+                if status_dict.get("ok") == "pong":
+                    worker_nodes.append(node)
+
+        if not worker_nodes:
+            error_message = "No active Celery workers responded to control ping."
+
+    except (CeleryError, KombuOperationalError, TimeoutError, OSError) as exc:
+        error_message = f"Celery broker or worker communication failure: {exc!s}"
+
+    is_healthy = len(worker_nodes) > 0 and error_message is None
+
+    if not is_healthy:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return {
         "name": "hook-relay-celery",
         "version": "1.0",
-        "status": "healthy" if str(result) == "healthy" else "unhealthy",
+        "status": "healthy" if is_healthy else "unhealthy",
+        "active_workers_count": len(worker_nodes),
+        "workers": worker_nodes,
         "error_message": error_message,
     }

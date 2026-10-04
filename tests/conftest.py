@@ -260,12 +260,15 @@ def mock_external_services(mocker):
         new_callable=AsyncMock,
     )
 
-    # Mock Celery health check task
+    # Mock Celery health check task and worker ping
     mock_celery_task = MagicMock()
     mock_async_result = MagicMock()
     mock_async_result.get.return_value = "pong"
     mock_celery_task.apply_async.return_value = mock_async_result
-    mocker.patch("src.main.health_check_task", mock_celery_task)
+    mocker.patch(
+        "src.main._ping_celery_workers",
+        return_value=[{"celery@test-worker": {"ok": "pong"}}],
+    )
 
     return {
         "redis": mock_redis,

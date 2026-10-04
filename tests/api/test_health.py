@@ -6,11 +6,10 @@
 - 404 Route handling
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from celery.exceptions import OperationalError as CeleryOperationalError
-from celery.exceptions import TimeoutError as CeleryTimeoutError
 from fastapi import FastAPI
 from httpx import AsyncClient
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -164,12 +163,11 @@ async def test_readiness_check_fails_when_both_disconnect(
 # ---------------------------------------------------------------------------
 @pytest.mark.api
 async def test_celery_health_check_healthy(async_client: AsyncClient, mocker):
-    """Verifies that /celery-health returns healthy when Celery worker responds."""
-    mock_task = MagicMock()
-    mock_result = MagicMock()
-    mock_result.get.return_value = "healthy"
-    mock_task.delay.return_value = mock_result
-    mocker.patch("src.main.health_check_task", mock_task)
+    """Verifies that /celery-health returns 200 OK and healthy when Celery workers respond."""
+    mocker.patch(
+        "src.main._ping_celery_workers",
+        return_value=[{"celery@worker1": {"ok": "pong"}}],
+    )
 
     response = await async_client.get("/celery-health")
 
@@ -177,39 +175,42 @@ async def test_celery_health_check_healthy(async_client: AsyncClient, mocker):
     data = response.json()
     assert data["name"] == "hook-relay-celery"
     assert data["status"] == "healthy"
+    assert data["active_workers_count"] == 1
+    assert "celery@worker1" in data["workers"]
     assert data["error_message"] is None
 
 
 @pytest.mark.api
-async def test_celery_health_check_timeout(async_client: AsyncClient, mocker):
-    """Verifies that /celery-health handles CeleryTimeoutError gracefully."""
-    mock_task = MagicMock()
-    mock_result = MagicMock()
-    mock_result.get.side_effect = CeleryTimeoutError("Task timed out after 2s")
-    mock_task.delay.return_value = mock_result
-    mocker.patch("src.main.health_check_task", mock_task)
+async def test_celery_health_check_no_workers_returns_503(async_client: AsyncClient, mocker):
+    """Verifies that /celery-health returns 503 Service Unavailable when no workers respond."""
+    mocker.patch(
+        "src.main._ping_celery_workers",
+        return_value=[],
+    )
 
     response = await async_client.get("/celery-health")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
     data = response.json()
     assert data["status"] == "unhealthy"
-    assert "Task timed out" in data["error_message"]
+    assert data["active_workers_count"] == 0
+    assert "No active Celery workers" in data["error_message"]
 
 
 @pytest.mark.api
-async def test_celery_health_check_operational_error(
+async def test_celery_health_check_operational_error_returns_503(
     async_client: AsyncClient,
     mocker,
 ):
-    """Verifies that /celery-health handles broker operational connection errors."""
-    mock_task = MagicMock()
-    mock_task.delay.side_effect = CeleryOperationalError("Cannot connect to broker")
-    mocker.patch("src.main.health_check_task", mock_task)
+    """Verifies that /celery-health returns 503 Service Unavailable on broker operational error."""
+    mocker.patch(
+        "src.main._ping_celery_workers",
+        side_effect=CeleryOperationalError("Cannot connect to broker"),
+    )
 
     response = await async_client.get("/celery-health")
 
-    assert response.status_code == 200
+    assert response.status_code == 503
     data = response.json()
     assert data["status"] == "unhealthy"
     assert "Cannot connect to broker" in data["error_message"]
