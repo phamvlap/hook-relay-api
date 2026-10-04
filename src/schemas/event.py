@@ -1,8 +1,8 @@
-import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+import orjson
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.exceptions.event import EventValidationError
@@ -26,8 +26,8 @@ class EventCreateRequest(BaseModel):
     @field_validator("payload")
     @classmethod
     def validate_payload_size(cls, value: dict[str, Any]) -> dict[str, Any]:
-        serialized = json.dumps(value, default=str)
-        if len(serialized.encode("utf-8")) > _MAX_PAYLOAD_SIZE:
+        serialized = orjson.dumps(value, default=str)
+        if len(serialized) > _MAX_PAYLOAD_SIZE:
             raise EventValidationError(f"Payload size cannot exceed {_MAX_PAYLOAD_SIZE} bytes")
         return value
 

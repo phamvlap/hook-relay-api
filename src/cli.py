@@ -6,10 +6,11 @@ Provides administrative commands for managing owners, API keys, and system tasks
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 from typing import Annotated
+
+import orjson
 
 # Ensure project root is on sys.path when executed directly as `python src/cli.py`
 _project_root = str(Path(__file__).resolve().parent.parent)
@@ -65,7 +66,7 @@ def _render_owner_and_key(
                 "api_key": api_key.api_key,
             },
         }
-        typer.echo(json.dumps(payload, indent=2))
+        typer.echo(orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8"))
         return
 
     table = Table(show_header=False, box=None, padding=(0, 2))
@@ -128,7 +129,7 @@ def _handle_create_owner(
         _render_owner_and_key(owner, api_key, as_json=as_json)
     except Exception as exc:
         if as_json:
-            typer.echo(json.dumps({"error": str(exc)}), file=sys.stderr)
+            typer.echo(orjson.dumps({"error": str(exc)}).decode("utf-8"), file=sys.stderr)
         else:
             err_console.print(f"[bold red]Error:[/bold red] Failed to create owner: {exc}")
         raise typer.Exit(code=1) from exc

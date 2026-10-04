@@ -1,10 +1,10 @@
-import json
 import time
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
 import httpx
+import orjson
 from celery import Task
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -94,7 +94,7 @@ class DeliveryService:
             "data": event.payload,
             "timestamp": event.created_at.isoformat(),
         }
-        payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        payload_bytes = orjson.dumps(payload)
 
         headers = {
             "Content-Type": "application/json",

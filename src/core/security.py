@@ -50,14 +50,7 @@ async def get_auth_context_from_api_key(
             api_key = await repo.get_by_key_id(key_id=parsed_key.key_id)
 
             if api_key is not None:
-                cached_api_key = APIKeyAuthData(
-                    api_key_id=api_key.id,
-                    owner_id=api_key.owner_id,
-                    key_id=api_key.key_id,
-                    key_hash=api_key.key_hash,
-                    environment=api_key.environment,
-                    status=api_key.status,
-                )
+                cached_api_key = APIKeyAuthData.from_model(api_key)
 
             if cached_api_key is not None:
                 await auth_cache.set_l2(parsed_key.key_id, cached_api_key)

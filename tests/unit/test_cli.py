@@ -1,10 +1,10 @@
 """Unit tests for Hook Relay CLI commands and workflows using standard mocks."""
 
-import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import orjson
 import pytest
 from typer.testing import CliRunner
 
@@ -91,7 +91,7 @@ class TestCLICreateOwnerCommand:
             result = runner.invoke(app, ["create-owner", "--name", "production-backend", "--json"])
 
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = orjson.loads(result.output)
 
             assert data["owner"]["id"] == str(mock_owner_response.id)
             assert data["api_key"]["key_id"] == mock_api_key_response.key_id
@@ -145,7 +145,7 @@ class TestCLICreateOwnerCommand:
             result = runner.invoke(app, ["create-owner", "--name", "demo", "--json"])
 
             assert result.exit_code == 1
-            error_payload = json.loads(result.output)
+            error_payload = orjson.loads(result.output)
             assert error_payload == {"error": "Unique violation"}
 
 

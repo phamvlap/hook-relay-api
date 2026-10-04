@@ -1,8 +1,9 @@
-import json
 from dataclasses import dataclass
 from uuid import UUID
 
-from src.models.api_key import APIKeyEnvironment, APIKeyStatus
+import orjson
+
+from src.models.api_key import APIKey, APIKeyEnvironment, APIKeyStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +44,7 @@ class APIKeyAuthData:
 
     def to_json(self) -> str:
         """Serializes auth data to JSON string for Redis caching."""
-        return json.dumps(
+        return orjson.dumps(
             {
                 "api_key_id": str(self.api_key_id),
                 "owner_id": str(self.owner_id),
@@ -52,13 +53,13 @@ class APIKeyAuthData:
                 "status": self.status.value,
                 "environment": self.environment.value,
             }
-        )
+        ).decode("utf-8")
 
     @classmethod
     def from_json(cls, payload: str | bytes) -> "APIKeyAuthData | None":
         """Deserializes JSON payload from Redis into APIKeyAuthData."""
         try:
-            json_data = json.loads(payload)
+            json_data = orjson.loads(payload)
             return cls(
                 api_key_id=UUID(json_data["api_key_id"]),
                 owner_id=UUID(json_data["owner_id"]),
@@ -67,5 +68,17 @@ class APIKeyAuthData:
                 status=APIKeyStatus(json_data["status"]),
                 environment=APIKeyEnvironment(json_data["environment"]),
             )
-        except (json.JSONDecodeError, KeyError, ValueError):
+        except (orjson.JSONDecodeError, KeyError, ValueError, TypeError):
             return None
+
+    @classmethod
+    def from_model(cls, api_key: APIKey) -> "APIKeyAuthData":
+        """Creates an APIKeyAuthData instance from the APIKey model."""
+        return cls(
+            api_key_id=api_key.id,
+            owner_id=api_key.owner_id,
+            key_id=api_key.key_id,
+            key_hash=api_key.key_hash,
+            status=api_key.status,
+            environment=api_key.environment,
+        )
