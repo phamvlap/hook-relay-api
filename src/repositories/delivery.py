@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -85,7 +87,7 @@ class DeliveryRepository:
         result = await self.session.execute(stmt)
         return result.scalar() or 0
 
-    async def list(
+    async def find_many(
         self,
         *,
         owner_id: str | UUID,
@@ -305,6 +307,30 @@ class DeliveryRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
+
+    async def get_stuck_deliveries_for_update(
+        self,
+        *,
+        stuck_before: datetime,
+        limit: int = 100,
+    ) -> list[WebhookDelivery]:
+        stmt = (
+            select(WebhookDelivery)
+            .where(
+                WebhookDelivery.status == WebhookDeliveryStatus.DELIVERING,
+                WebhookDelivery.updated_at <= stuck_before,
+                WebhookDelivery.deleted_at.is_(None),
+            )
+            .options(
+                selectinload(WebhookDelivery.endpoint),
+                selectinload(WebhookDelivery.event),
+            )
+            .order_by(WebhookDelivery.updated_at.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
 
 class DeliveryAttemptRepository:

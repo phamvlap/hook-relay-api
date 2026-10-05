@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 
@@ -130,154 +132,163 @@ class DeliveryService:
         start_time = time.monotonic()
         sanitized_headers = self._sanitize_request_headers(headers)
 
+        pending_retry_delay: float | None = None
+
         try:
-            response = await self.httpx_client.post(
-                endpoint.url,
-                content=payload_bytes,
-                headers=headers,
-            )
+            try:
+                response = await self.httpx_client.post(
+                    endpoint.url,
+                    content=payload_bytes,
+                    headers=headers,
+                )
 
-            completed_at = datetime.now(tz=UTC)
-            duration_ms = int((time.monotonic() - start_time) * 1000)
-            response_body = self._get_response_body(response)
-            response_headers = self._sanitize_response_headers(dict(response.headers))
+                completed_at = datetime.now(tz=UTC)
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                response_body = self._get_response_body(response)
+                response_headers = self._sanitize_response_headers(dict(response.headers))
 
-            if self._is_successful_status(response.status_code):
+                if self._is_successful_status(response.status_code):
+                    await self.delivery_attempt_repository.create(
+                        delivery_id=delivery.id,
+                        attempt_number=current_attempt_num,
+                        started_at=started_at,
+                        completed_at=completed_at,
+                        duration_ms=duration_ms,
+                        status_code=response.status_code,
+                        request_headers=sanitized_headers,
+                        response_headers=response_headers,
+                        response_body=response_body,
+                    )
+                    await self.delivery_repository.mark_as_success(
+                        delivery=delivery,
+                        status_code=response.status_code,
+                        response_body=response_body,
+                        duration_ms=duration_ms,
+                    )
+
+                elif self.retry_policy.should_retry(
+                    current_retry_count=delivery.retry_count,
+                    status_code=response.status_code,
+                    custom_max_retries=endpoint.max_retries,
+                ):
+                    error_message = f"HTTP {response.status_code}"
+                    await self.delivery_attempt_repository.create(
+                        delivery_id=delivery.id,
+                        attempt_number=current_attempt_num,
+                        started_at=started_at,
+                        completed_at=completed_at,
+                        duration_ms=duration_ms,
+                        status_code=response.status_code,
+                        request_headers=sanitized_headers,
+                        response_headers=response_headers,
+                        response_body=response_body,
+                        error_message=error_message,
+                    )
+                    pending_retry_delay = await self._process_retry_or_failure(
+                        delivery=delivery,
+                        error_message=error_message,
+                        should_retry=True,
+                        max_retries=endpoint.max_retries,
+                        duration_ms=duration_ms,
+                        status_code=response.status_code,
+                        response_headers=response_headers,
+                    )
+
+                else:
+                    error_message = f"Received status code {response.status_code}"
+                    await self.delivery_attempt_repository.create(
+                        delivery_id=delivery.id,
+                        attempt_number=current_attempt_num,
+                        started_at=started_at,
+                        completed_at=completed_at,
+                        duration_ms=duration_ms,
+                        status_code=response.status_code,
+                        request_headers=sanitized_headers,
+                        response_headers=response_headers,
+                        response_body=response_body,
+                        error_message=error_message,
+                    )
+                    await self.delivery_repository.mark_as_failed(
+                        delivery=delivery,
+                        status_code=response.status_code,
+                        response_body=response_body,
+                        error_message=error_message,
+                        duration_ms=duration_ms,
+                    )
+
+            except (SSRFSecurityError, httpcore.ConnectError) as exc:
+                completed_at = datetime.now(tz=UTC)
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                error_message = f"SSRF Blocked or Connection Error: {exc!s}"
                 await self.delivery_attempt_repository.create(
                     delivery_id=delivery.id,
                     attempt_number=current_attempt_num,
                     started_at=started_at,
                     completed_at=completed_at,
                     duration_ms=duration_ms,
-                    status_code=response.status_code,
+                    status_code=None,
                     request_headers=sanitized_headers,
-                    response_headers=response_headers,
-                    response_body=response_body,
-                )
-                await self.delivery_repository.mark_as_success(
-                    delivery=delivery,
-                    status_code=response.status_code,
-                    response_body=response_body,
-                    duration_ms=duration_ms,
-                )
-
-            elif self.retry_policy.should_retry(
-                current_retry_count=delivery.retry_count,
-                status_code=response.status_code,
-                custom_max_retries=endpoint.max_retries,
-            ):
-                error_message = f"HTTP {response.status_code}"
-                await self.delivery_attempt_repository.create(
-                    delivery_id=delivery.id,
-                    attempt_number=current_attempt_num,
-                    started_at=started_at,
-                    completed_at=completed_at,
-                    duration_ms=duration_ms,
-                    status_code=response.status_code,
-                    request_headers=sanitized_headers,
-                    response_headers=response_headers,
-                    response_body=response_body,
-                    error_message=error_message,
-                )
-                await self._process_retry_or_failure(
-                    delivery=delivery,
-                    error_message=error_message,
-                    should_retry=True,
-                    max_retries=endpoint.max_retries,
-                    duration_ms=duration_ms,
-                    status_code=response.status_code,
-                    response_headers=response_headers,
-                )
-
-            else:
-                error_message = f"Received status code {response.status_code}"
-                await self.delivery_attempt_repository.create(
-                    delivery_id=delivery.id,
-                    attempt_number=current_attempt_num,
-                    started_at=started_at,
-                    completed_at=completed_at,
-                    duration_ms=duration_ms,
-                    status_code=response.status_code,
-                    request_headers=sanitized_headers,
-                    response_headers=response_headers,
-                    response_body=response_body,
                     error_message=error_message,
                 )
                 await self.delivery_repository.mark_as_failed(
                     delivery=delivery,
-                    status_code=response.status_code,
-                    response_body=response_body,
+                    status_code=None,
                     error_message=error_message,
                     duration_ms=duration_ms,
                 )
 
-        except (SSRFSecurityError, httpcore.ConnectError) as exc:
-            completed_at = datetime.now(tz=UTC)
-            duration_ms = int((time.monotonic() - start_time) * 1000)
-            error_message = f"SSRF Blocked or Connection Error: {exc!s}"
-            await self.delivery_attempt_repository.create(
-                delivery_id=delivery.id,
-                attempt_number=current_attempt_num,
-                started_at=started_at,
-                completed_at=completed_at,
-                duration_ms=duration_ms,
-                status_code=None,
-                request_headers=sanitized_headers,
-                error_message=error_message,
-            )
-            # Permanent failure: Do NOT retry endpoints that hit private/blocked networks
-            await self.delivery_repository.mark_as_failed(
-                delivery=delivery,
-                status_code=None,
-                error_message=error_message,
-                duration_ms=duration_ms,
-            )
+            except httpx.InvalidURL as exc:
+                completed_at = datetime.now(tz=UTC)
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                await self.delivery_attempt_repository.create(
+                    delivery_id=delivery.id,
+                    attempt_number=current_attempt_num,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_ms=duration_ms,
+                    status_code=None,
+                    request_headers=sanitized_headers,
+                    error_message=str(exc),
+                )
+                await self.delivery_repository.mark_as_failed(
+                    delivery=delivery,
+                    status_code=None,
+                    error_message=str(exc),
+                    duration_ms=duration_ms,
+                )
 
-        except httpx.InvalidURL as exc:
-            completed_at = datetime.now(tz=UTC)
-            duration_ms = int((time.monotonic() - start_time) * 1000)
-            await self.delivery_attempt_repository.create(
-                delivery_id=delivery.id,
-                attempt_number=current_attempt_num,
-                started_at=started_at,
-                completed_at=completed_at,
-                duration_ms=duration_ms,
-                status_code=None,
-                request_headers=sanitized_headers,
-                error_message=str(exc),
-            )
-            await self.delivery_repository.mark_as_failed(
-                delivery=delivery,
-                status_code=None,
-                error_message=str(exc),
-                duration_ms=duration_ms,
-            )
+            except (httpx.TimeoutException, httpx.RequestError) as exc:
+                completed_at = datetime.now(tz=UTC)
+                duration_ms = int((time.monotonic() - start_time) * 1000)
+                await self.delivery_attempt_repository.create(
+                    delivery_id=delivery.id,
+                    attempt_number=current_attempt_num,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                    duration_ms=duration_ms,
+                    status_code=None,
+                    request_headers=sanitized_headers,
+                    error_message=str(exc),
+                )
+                pending_retry_delay = await self._process_retry_or_failure(
+                    delivery=delivery,
+                    error_message=str(exc),
+                    should_retry=True,
+                    max_retries=endpoint.max_retries,
+                    duration_ms=duration_ms,
+                    status_code=None,
+                )
 
-        except (httpx.TimeoutException, httpx.RequestError) as exc:
-            completed_at = datetime.now(tz=UTC)
-            duration_ms = int((time.monotonic() - start_time) * 1000)
-            await self.delivery_attempt_repository.create(
-                delivery_id=delivery.id,
-                attempt_number=current_attempt_num,
-                started_at=started_at,
-                completed_at=completed_at,
-                duration_ms=duration_ms,
-                status_code=None,
-                request_headers=sanitized_headers,
-                error_message=str(exc),
-            )
-            await self._process_retry_or_failure(
-                delivery=delivery,
-                error_message=str(exc),
-                should_retry=True,
-                max_retries=endpoint.max_retries,
-                duration_ms=duration_ms,
-                status_code=None,
-            )
-
-        finally:
             await self.session.commit()
             await self._sync_event_status(event_id=str(event.id))
+
+        except Exception:
+            await self.session.rollback()
+            raise
+
+        if pending_retry_delay is not None:
+            task = cast(Task, deliver_webhook_task)
+            task.apply_async(args=[str(delivery.id)], countdown=int(pending_retry_delay))
 
     def _sanitize_request_headers(self, headers: dict[str, str]) -> dict[str, str]:
         sanitized = dict(headers)
@@ -335,7 +346,7 @@ class DeliveryService:
         duration_ms: int,
         status_code: int | None = None,
         response_headers: dict[str, str] | None = None,
-    ) -> None:
+    ) -> float | None:
         if not should_retry:
             await self.delivery_repository.mark_as_failed(
                 delivery=delivery,
@@ -343,7 +354,7 @@ class DeliveryService:
                 error_message=error_message,
                 duration_ms=duration_ms,
             )
-            return
+            return None
 
         next_retry_count = delivery.retry_count + 1
         next_attempt = delivery.attempt + 1
@@ -369,7 +380,7 @@ class DeliveryService:
                     error_message=error_message,
                     duration_ms=duration_ms,
                 )
-            return
+            return None
 
         retry_delay = self.retry_policy.compute_delay(
             retry_count=delivery.retry_count,
@@ -386,8 +397,7 @@ class DeliveryService:
             next_retry_at=self.retry_policy.compute_next_retry_time(delay_seconds=retry_delay),
         )
 
-        task = cast(Task, deliver_webhook_task)
-        task.apply_async(args=[str(delivery.id)], countdown=retry_delay)
+        return retry_delay
 
     async def list_by_event(
         self,
@@ -398,7 +408,7 @@ class DeliveryService:
         page_params: PageNumberPaginationParams,
     ) -> PageNumberPaginationResponse[DeliveryListInEvent]:
         total_count = await self.delivery_repository.count(event_id=event_id, owner_id=owner_id)
-        items = await self.delivery_repository.list(
+        items = await self.delivery_repository.find_many(
             event_id=event_id,
             owner_id=owner_id,
             offset=page_params.offset,
@@ -429,7 +439,7 @@ class DeliveryService:
             endpoint_id=endpoint_id,
             status=status,
         )
-        items = await self.delivery_repository.list(
+        items = await self.delivery_repository.find_many(
             owner_id=owner_id,
             event_id=event_id,
             endpoint_id=endpoint_id,
@@ -524,3 +534,94 @@ class DeliveryService:
         task.delay(str(delivery.id))
 
         return DeliveryRetryResponse(success=True)
+
+    async def reap_stuck_deliveries(
+        self,
+        *,
+        timeout_seconds: int = 300,
+        batch_size: int = 100,
+    ) -> int:
+        """Finds deliveries stuck in 'delivering' status beyond the timeout,
+        records a failed attempt, and transitions them to retrying or dead_letter.
+        """
+        stuck_threshold = datetime.now(tz=UTC) - timedelta(seconds=timeout_seconds)
+        stuck_deliveries = await self.delivery_repository.get_stuck_deliveries_for_update(
+            stuck_before=stuck_threshold,
+            limit=batch_size,
+        )
+
+        if not stuck_deliveries:
+            return 0
+
+        dispatches: list[tuple[str, float]] = []
+        events_to_sync: set[str] = set()
+
+        try:
+            for delivery in stuck_deliveries:
+                endpoint = delivery.endpoint
+                max_retries = endpoint.max_retries
+                next_retry_count = delivery.retry_count + 1
+                next_attempt = delivery.attempt + 1
+                now = datetime.now(tz=UTC)
+
+                # Record an attempt indicating worker crash or execution timeout
+                await self.delivery_attempt_repository.create(
+                    delivery_id=delivery.id,
+                    attempt_number=delivery.attempt,
+                    started_at=delivery.updated_at,
+                    completed_at=now,
+                    duration_ms=int((now - delivery.updated_at).total_seconds() * 1000),
+                    status_code=None,
+                    error_message="Worker terminated unexpectedly or delivery execution timed out in-flight.",
+                )
+
+                should_retry = self.retry_policy.should_retry(
+                    current_retry_count=delivery.retry_count,
+                    status_code=None,
+                    custom_max_retries=max_retries,
+                )
+
+                if not should_retry or next_retry_count >= max_retries:
+                    await self.delivery_repository.mark_as_dead_letter(
+                        delivery=delivery,
+                        attempt=next_attempt,
+                        retry_count=next_retry_count,
+                        status_code=None,
+                        error_message="Exceeded max retries after worker crash/timeout.",
+                        duration_ms=int((now - delivery.updated_at).total_seconds() * 1000),
+                    )
+                else:
+                    retry_delay = self.retry_policy.compute_delay(
+                        retry_count=delivery.retry_count,
+                        status_code=None,
+                    )
+                    await self.delivery_repository.mark_as_retrying(
+                        delivery=delivery,
+                        attempt=next_attempt,
+                        retry_count=next_retry_count,
+                        status_code=None,
+                        error_message="Reaped from stuck delivering state; scheduled for retry.",
+                        duration_ms=int((now - delivery.updated_at).total_seconds() * 1000),
+                        next_retry_at=self.retry_policy.compute_next_retry_time(
+                            delay_seconds=retry_delay
+                        ),
+                    )
+                    dispatches.append((str(delivery.id), retry_delay))
+
+                if delivery.event_id:
+                    events_to_sync.add(str(delivery.event_id))
+
+            await self.session.commit()
+
+            for event_id in events_to_sync:
+                await self._sync_event_status(event_id=event_id)
+
+        except Exception:
+            await self.session.rollback()
+            raise
+
+        task = cast(Task, deliver_webhook_task)
+        for delivery_id, delay in dispatches:
+            task.apply_async(args=[delivery_id], countdown=int(delay))
+
+        return len(stuck_deliveries)

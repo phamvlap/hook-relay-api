@@ -37,6 +37,10 @@ celery_app.conf.update(
             "task": "src.tasks.api_key.flush_api_key_last_used_task",
             "schedule": 60.0,
         },
+        "reap-stuck-deliveries-every-minute": {
+            "task": "src.tasks.webhook.reap_stuck_deliveries_task",
+            "schedule": 120.0,
+        },
     },
 )
 
