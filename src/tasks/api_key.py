@@ -1,10 +1,8 @@
-import asyncio
-
 from src.database.session import get_async_db_context
 from src.infrastructure.redis.client import get_sync_redis_client
 from src.infrastructure.redis.usage_buffer import APIKeyUsageBuffer
 from src.repositories.api_key import APIKeyRepository
-from src.tasks.celery_app import celery_app
+from src.tasks.celery_app import celery_app, run_in_worker_loop
 
 
 @celery_app.task()
@@ -24,4 +22,4 @@ def flush_api_key_last_used_task() -> int:
             repo = APIKeyRepository(session)
             return await repo.bulk_update_last_used(usages)
 
-    return asyncio.run(_flush())
+    return run_in_worker_loop(_flush())

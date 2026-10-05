@@ -1,10 +1,8 @@
-import asyncio
-
 from src.database.session import get_async_db_context
 from src.repositories.delivery import DeliveryAttemptRepository, DeliveryRepository
 from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.repositories.event import EventRepository
-from src.tasks.celery_app import celery_app
+from src.tasks.celery_app import celery_app, run_in_worker_loop
 
 
 @celery_app.task
@@ -27,4 +25,4 @@ def deliver_webhook_task(delivery_id: str) -> None:
                 await session.rollback()
                 raise
 
-    asyncio.run(_run())
+    run_in_worker_loop(_run())

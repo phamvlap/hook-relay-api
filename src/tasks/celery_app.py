@@ -1,6 +1,17 @@
+import asyncio
+import concurrent.futures
+import logging
+from collections.abc import Coroutine
+from typing import TypeVar
+
 from celery import Celery
+from celery.signals import worker_process_init, worker_process_shutdown
 
 from src.core.config import settings
+from src.core.http_client import close_safe_http_client
+from src.database.session import worker_async_engine
+
+logger = logging.getLogger(__name__)
 
 celery_app = Celery(
     "hook_relay",
@@ -28,3 +39,57 @@ celery_app.conf.update(
         },
     },
 )
+
+_worker_loop: asyncio.AbstractEventLoop | None = None
+T = TypeVar("T")
+
+
+def get_worker_loop() -> asyncio.AbstractEventLoop:
+    """Returns or creates a persistent event loop for the current Celery worker process.
+
+    Prevents transient event loop creation/destruction per task invocation, allowing
+    database connection pools and HTTP clients to remain open and reused without connection churn.
+    """
+    global _worker_loop
+    if _worker_loop is None or _worker_loop.is_closed():
+        _worker_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_worker_loop)
+    return _worker_loop
+
+
+def run_in_worker_loop[T](async_coroutine: Coroutine[object, object, T]) -> T:
+    """Executes an async coroutine inside the worker process's persistent event loop."""
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is not None and running_loop.is_running():
+        # Defensive fallback if invoked synchronously inside an already running event loop (e.g. tests)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(lambda: asyncio.run(async_coroutine)).result()
+
+    loop = get_worker_loop()
+    return loop.run_until_complete(async_coroutine)
+
+
+@worker_process_init.connect
+def on_worker_process_init(**kwargs: object) -> None:
+    """Initializes persistent worker event loop when a child worker process is spawned."""
+    get_worker_loop()
+
+
+@worker_process_shutdown.connect
+def on_worker_process_shutdown(**kwargs: object) -> None:
+    """Gracefully disposes pooled database connections and HTTP client on worker shutdown."""
+    global _worker_loop
+    if _worker_loop and not _worker_loop.is_closed():
+        try:
+            _worker_loop.run_until_complete(worker_async_engine.dispose())
+            _worker_loop.run_until_complete(close_safe_http_client())
+        except (RuntimeError, TimeoutError, OSError) as e:
+            logger.warning("Error disposing worker async resources: %s", e)
+        finally:
+            _worker_loop.close()
+            _worker_loop = None

@@ -1,10 +1,8 @@
 """Unit tests for database session configuration and PgBouncer compatibility."""
 
-import asyncio
-
 import pytest
 from sqlalchemy import text
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 
 from src.database.session import (
     _ASYNCPG_CONNECT_ARGS,
@@ -12,6 +10,7 @@ from src.database.session import (
     get_async_db_context,
     worker_async_engine,
 )
+from src.tasks.celery_app import run_in_worker_loop
 
 
 @pytest.mark.unit
@@ -24,8 +23,6 @@ class TestDatabaseSessionConfiguration:
     def test_engines_contain_disabled_statement_cache_connect_args(self):
         """Both web async_engine and worker_async_engine must have statement_cache_size=0 configured."""
         for engine in (async_engine, worker_async_engine):
-            # Check the connect_args of the engine
-            connect_args = engine.url.query
             # Either via dialect connect_args or URL query
             dialect_args = getattr(engine.dialect, "connect_args", {})
             assert (
@@ -33,17 +30,18 @@ class TestDatabaseSessionConfiguration:
                 or _ASYNCPG_CONNECT_ARGS.get("statement_cache_size") == 0
             )
 
-    def test_worker_engine_uses_null_pool(self):
-        """Worker engine used by Celery tasks and CLI commands must use NullPool to avoid cross-loop errors."""
-        assert isinstance(worker_async_engine.pool, NullPool)
+    def test_worker_engine_uses_connection_pool(self):
+        """Worker engine used by Celery tasks and CLI commands must use connection pooling to avoid connection churn."""
+        assert not isinstance(worker_async_engine.pool, NullPool)
+        assert isinstance(worker_async_engine.pool, AsyncAdaptedQueuePool)
 
 
 @pytest.mark.integration
 class TestWorkerAsyncEngineExecution:
-    def test_consecutive_asyncio_run_calls_do_not_conflict(self):
-        """Simulate sequential Celery task runs each invoking asyncio.run().
+    def test_consecutive_worker_loop_tasks_reuse_connection(self):
+        """Simulate sequential Celery task runs each executing within the worker's persistent event loop.
 
-        Verifies that no cross-loop Future/transport errors or DuplicatePreparedStatementError occurs.
+        Verifies that consecutive task runs safely reuse pooled connections without cross-loop errors.
         """
 
         def _execute_task():
@@ -52,7 +50,7 @@ class TestWorkerAsyncEngineExecution:
                     res = await session.execute(text("SELECT 1"))
                     return res.scalar()
 
-            return asyncio.run(_task())
+            return run_in_worker_loop(_task())
 
         result_1 = _execute_task()
         result_2 = _execute_task()

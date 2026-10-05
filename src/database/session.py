@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import NullPool
 
 from src.core.config import settings
 
@@ -38,11 +37,14 @@ async_engine: AsyncEngine = create_async_engine(
     connect_args=_ASYNCPG_CONNECT_ARGS,
 )
 
-# Async engine for Celery tasks, CLI commands, and one-off background processes
-# Uses NullPool so connections are not retained across transient asyncio.run() event loops
+# Async engine for Celery tasks, CLI commands, and background processes
+# Pooled with connection bounds to prevent connection churn across worker tasks
 worker_async_engine: AsyncEngine = create_async_engine(
     settings.postgres_async_dsn_str,
-    poolclass=NullPool,
+    pool_size=10,
+    max_overflow=5,
+    pool_pre_ping=True,
+    pool_recycle=1800,
     connect_args=_ASYNCPG_CONNECT_ARGS,
 )
 
