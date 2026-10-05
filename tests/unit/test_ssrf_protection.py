@@ -7,7 +7,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from src.core.http_client import get_safe_http_client
+from src.core.http_client import close_safe_http_client, get_safe_http_client
 from src.core.ssrf import (
     AntiSSRFNetworkBackend,
     SSRFSecurityError,
@@ -183,3 +183,42 @@ def test_get_safe_http_client_configuration():
     client = get_safe_http_client()
     assert client.follow_redirects is False
     assert isinstance(client._transport, httpx.AsyncHTTPTransport)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_get_safe_http_client_reused_within_same_loop():
+    """Ensures repeated calls within the same event loop reuse the exact same client instance."""
+    client1 = get_safe_http_client()
+    client2 = get_safe_http_client()
+    assert client1 is client2
+    assert not client1.is_closed
+
+
+@pytest.mark.unit
+def test_get_safe_http_client_recreated_on_new_event_loop():
+    """Ensures client is safely re-created when the event loop changes (e.g. across Celery tasks)."""
+    import asyncio
+
+    async def _get_client_in_loop():
+        return get_safe_http_client()
+
+    client_loop1 = asyncio.run(_get_client_in_loop())
+    client_loop2 = asyncio.run(_get_client_in_loop())
+
+    # Should be different instances bound to their respective event loops
+    assert client_loop1 is not client_loop2
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_close_safe_http_client_resets_singleton():
+    """Ensures close_safe_http_client closes the client and resets the singleton."""
+    client1 = get_safe_http_client()
+    await close_safe_http_client()
+    assert client1.is_closed
+
+    client2 = get_safe_http_client()
+    assert client2 is not client1
+    assert not client2.is_closed
+    await close_safe_http_client()

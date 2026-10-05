@@ -5,6 +5,7 @@ Provides connection-pooled HTTPX clients with configurable policies and Anti-SSR
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -51,6 +52,7 @@ def create_anti_ssrf_transport(config: HTTPClientConfig | None = None) -> httpx.
 
 
 _SAFE_HTTP_CLIENT: httpx.AsyncClient | None = None
+_CLIENT_LOOP: asyncio.AbstractEventLoop | None = None
 
 
 def get_safe_http_client(config: HTTPClientConfig | None = None) -> httpx.AsyncClient:
@@ -60,9 +62,22 @@ def get_safe_http_client(config: HTTPClientConfig | None = None) -> httpx.AsyncC
     - Transport-level IP pinning and DNS validation
     - follow_redirects=False (prevents redirect-based SSRF)
     - Strict connection and read timeouts
+    - Re-initializes client if the asyncio event loop changed or closed (e.g. across Celery tasks)
     """
-    global _SAFE_HTTP_CLIENT
-    if _SAFE_HTTP_CLIENT is None or _SAFE_HTTP_CLIENT.is_closed:
+    global _SAFE_HTTP_CLIENT, _CLIENT_LOOP
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if (
+        _SAFE_HTTP_CLIENT is None
+        or _SAFE_HTTP_CLIENT.is_closed
+        or (
+            current_loop is not None
+            and (_CLIENT_LOOP is not current_loop or current_loop.is_closed())
+        )
+    ):
         cfg = config or HTTPClientConfig()
         transport = create_anti_ssrf_transport(cfg)
         _SAFE_HTTP_CLIENT = httpx.AsyncClient(
@@ -76,12 +91,14 @@ def get_safe_http_client(config: HTTPClientConfig | None = None) -> httpx.AsyncC
             ),
             follow_redirects=False,
         )
+        _CLIENT_LOOP = current_loop
+
     return _SAFE_HTTP_CLIENT
 
 
 async def close_safe_http_client() -> None:
     """Gracefully closes the shared HTTP client during application shutdown."""
-    global _SAFE_HTTP_CLIENT
+    global _SAFE_HTTP_CLIENT, _CLIENT_LOOP
     if _SAFE_HTTP_CLIENT is not None and not _SAFE_HTTP_CLIENT.is_closed:
         try:
             await _SAFE_HTTP_CLIENT.aclose()
@@ -90,3 +107,7 @@ async def close_safe_http_client() -> None:
             logger.warning("Error closing safe HTTP client: %s", e)
         finally:
             _SAFE_HTTP_CLIENT = None
+            _CLIENT_LOOP = None
+    else:
+        _SAFE_HTTP_CLIENT = None
+        _CLIENT_LOOP = None
