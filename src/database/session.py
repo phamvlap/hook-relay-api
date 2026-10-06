@@ -12,39 +12,45 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.core.config import settings
 
-# Disable asyncpg & SQLAlchemy statement caching to support PgBouncer transaction/statement pooling (e.g. Supabase, AWS RDS Proxy)
+# Disable asyncpg & SQLAlchemy statement caching when configured (e.g., PgBouncer/Supabase transaction pooling)
 _ASYNCPG_CONNECT_ARGS = {
-    "statement_cache_size": 0,
-    "prepared_statement_cache_size": 0,
+    "statement_cache_size": settings.db_statement_cache_size,
+    "prepared_statement_cache_size": settings.db_statement_cache_size,
 }
 
-# Create a SQLAlchemy engine and session factory for the local database connection
+# Create a SQLAlchemy engine and session factory for synchronous operations (migrations, CLI, scripts)
 engine: Engine = create_engine(
     settings.postgres_dsn_str,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    pool_recycle=1800,
+    pool_size=settings.db_sync_pool_size,
+    max_overflow=settings.db_sync_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+    pool_recycle=settings.db_pool_recycle,
+    pool_pre_ping=settings.db_pool_pre_ping,
+    echo=settings.db_echo,
 )
 
-# Create a SQLAlchemy async engine and session factory for the local database connection
+# Create a SQLAlchemy async engine and session factory for the main FastAPI request lifecycle
 async_engine: AsyncEngine = create_async_engine(
     settings.postgres_async_dsn_str,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    pool_recycle=1800,
+    pool_size=settings.db_async_pool_size,
+    max_overflow=settings.db_async_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+    pool_recycle=settings.db_pool_recycle,
+    pool_pre_ping=settings.db_pool_pre_ping,
+    echo=settings.db_echo,
     connect_args=_ASYNCPG_CONNECT_ARGS,
 )
 
 # Async engine for Celery tasks, CLI commands, and background processes
-# Pooled with connection bounds to prevent connection churn across worker tasks
+# Pooled with dedicated connection bounds to prevent connection churn across worker tasks
 worker_async_engine: AsyncEngine = create_async_engine(
     settings.postgres_async_dsn_str,
-    pool_size=10,
-    max_overflow=5,
-    pool_pre_ping=True,
-    pool_recycle=1800,
+    pool_size=settings.db_worker_pool_size,
+    max_overflow=settings.db_worker_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+    pool_recycle=settings.db_pool_recycle,
+    pool_pre_ping=settings.db_pool_pre_ping,
+    echo=settings.db_echo,
     connect_args=_ASYNCPG_CONNECT_ARGS,
 )
 

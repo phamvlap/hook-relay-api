@@ -67,6 +67,74 @@ class Settings(BaseSettings):
         description="PostgreSQL database URL (optional)",
     )
 
+    # Database Pool & Engine Configuration (Shared)
+    db_pool_timeout: int = Field(
+        default=30,
+        ge=1,
+        description="Timeout in seconds to wait for an available connection from the pool",
+    )
+    db_pool_recycle: int = Field(
+        default=1800,
+        ge=-1,
+        description="Recycle connections older than this age in seconds (-1 to disable)",
+    )
+    db_pool_pre_ping: bool = Field(
+        default=True,
+        description="Enable connection liveness pre-ping before checkout to handle dropped connections",
+    )
+    db_echo: bool = Field(
+        default=False,
+        description="Log all SQL statements to stdout (use only in local development/debugging)",
+    )
+    db_statement_cache_size: int = Field(
+        default=0,
+        ge=0,
+        description="Prepared statement cache size for asyncpg (must be 0 when using PgBouncer/Supabase pooler in transaction mode)",
+    )
+
+    # Engine-Specific Pool Limits
+    # Sync Engine (migrations, CLI, sync utilities)
+    db_sync_pool_size: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Connection pool size for synchronous database connections",
+    )
+    db_sync_max_overflow: int = Field(
+        default=5,
+        ge=0,
+        le=50,
+        description="Maximum burst connections allowed beyond db_sync_pool_size",
+    )
+
+    # Main Async Engine (FastAPI web request handling)
+    db_async_pool_size: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Connection pool size for main async FastAPI connections",
+    )
+    db_async_max_overflow: int = Field(
+        default=10,
+        ge=0,
+        le=50,
+        description="Maximum burst connections allowed beyond db_async_pool_size",
+    )
+
+    # Worker Async Engine (Celery worker processes / background tasks)
+    db_worker_pool_size: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Connection pool size for background Celery worker async connections",
+    )
+    db_worker_max_overflow: int = Field(
+        default=5,
+        ge=0,
+        le=50,
+        description="Maximum burst connections allowed beyond db_worker_pool_size",
+    )
+
     # Redis configuration
     redis_host: str = Field(description="Redis host")
     redis_port: int = Field(ge=1, le=65535, description="Redis port")
