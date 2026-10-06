@@ -46,9 +46,27 @@ class Settings(BaseSettings):
         default="*",
         description="Comma-separated list of allowed hosts for the application",
     )
+    # CORS configuration
+    cors_enabled: bool = Field(
+        default=True,
+        description="Enable or disable CORS middleware globally",
+    )
     cors_origins: str = Field(
         default="*",
-        description="Comma-separated list of allowed origins for CORS",
+        description="Comma-separated list of allowed origins for CORS (e.g. 'http://localhost:3000,https://app.example.com')",
+    )
+    cors_origin_regex: str | None = Field(
+        default=None,
+        description="Optional regex pattern matching allowed origins for CORS (e.g. for dynamic preview environments)",
+    )
+    cors_allow_credentials: bool = Field(
+        default=True,
+        description="Indicate that cookies and authorization headers should be supported for cross-origin requests",
+    )
+    cors_max_age: int = Field(
+        default=600,
+        ge=0,
+        description="Maximum time in seconds for browsers to cache preflight OPTIONS responses",
     )
     trusted_proxies: str = Field(
         default="127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
