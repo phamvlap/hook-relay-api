@@ -148,6 +148,45 @@ class Settings(BaseSettings):
         description="Redis URL (optional)",
     )
 
+    # Redis Pool & Connection Configuration (Shared)
+    redis_socket_timeout: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Timeout in seconds for Redis socket read/write operations",
+    )
+    redis_socket_connect_timeout: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Timeout in seconds for establishing Redis socket connections",
+    )
+    redis_health_check_interval: int = Field(
+        default=30,
+        ge=0,
+        description="Interval in seconds for periodic health checks on idle connections (0 to disable)",
+    )
+    redis_retry_on_timeout: bool = Field(
+        default=True,
+        description="Automatically retry socket timeout operations once",
+    )
+    redis_decode_responses: bool = Field(
+        default=True,
+        description="Whether to automatically decode Redis responses to UTF-8 strings",
+    )
+
+    # Redis Pool Limits (Separated for Async and Sync)
+    redis_async_max_connections: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Maximum concurrent connections for the async Redis pool (FastAPI web traffic)",
+    )
+    redis_sync_max_connections: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        description="Maximum concurrent connections for the sync Redis pool (Celery worker / CLI tasks)",
+    )
+
     # Security configuration
     api_key_pepper: SecretStr = Field(description="High-entropy pepper value for API key hashing")
 

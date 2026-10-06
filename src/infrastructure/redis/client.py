@@ -17,8 +17,12 @@ def get_async_redis_pool() -> AsyncConnectionPool:
     if _async_pool is None:
         _async_pool = AsyncConnectionPool.from_url(
             settings.redis_dsn_str,
-            max_connections=50,
-            decode_responses=True,
+            max_connections=settings.redis_async_max_connections,
+            socket_timeout=settings.redis_socket_timeout,
+            socket_connect_timeout=settings.redis_socket_connect_timeout,
+            health_check_interval=settings.redis_health_check_interval,
+            retry_on_timeout=settings.redis_retry_on_timeout,
+            decode_responses=settings.redis_decode_responses,
         )
     return _async_pool
 
@@ -33,8 +37,12 @@ def get_sync_redis_pool() -> ConnectionPool:
     if _sync_pool is None:
         _sync_pool = ConnectionPool.from_url(
             settings.redis_dsn_str,
-            max_connections=20,
-            decode_responses=True,
+            max_connections=settings.redis_sync_max_connections,
+            socket_timeout=settings.redis_socket_timeout,
+            socket_connect_timeout=settings.redis_socket_connect_timeout,
+            health_check_interval=settings.redis_health_check_interval,
+            retry_on_timeout=settings.redis_retry_on_timeout,
+            decode_responses=settings.redis_decode_responses,
         )
     return _sync_pool
 
