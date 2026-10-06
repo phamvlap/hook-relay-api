@@ -18,11 +18,49 @@ from src.infrastructure.redis.client import get_async_redis_client
 from src.lifespan import lifespan
 from src.tasks.celery_app import celery_app
 
+# Swagger UI developer experience configuration
+_SWAGGER_UI_PARAMETERS = {
+    "persistAuthorization": True,  # Keeps authorization token/key on page refresh
+    "displayRequestDuration": True,  # Displays request duration in milliseconds
+    "filter": True,  # Adds quick search bar in Swagger UI
+    "tryItOutEnabled": True,  # Expands "Try it out" by default
+    "docExpansion": "list",  # Collapses operation details for faster scrolling
+}
+
+# OpenAPI Tag Metadata for clean grouping in docs
+_OPENAPI_TAGS = [
+    {
+        "name": "Health",
+        "description": "Liveness and readiness probes for service health monitoring.",
+    },
+    {
+        "name": "Endpoints",
+        "description": "Webhook endpoint destinations, secrets, and configurations.",
+    },
+    {
+        "name": "Events",
+        "description": "Ingested webhook events and dispatch status.",
+    },
+    {
+        "name": "Deliveries",
+        "description": "Webhook delivery attempts, payloads, and execution history.",
+    },
+]
+
+_APP_NAME = "Hook Relay API"
+_APP_DESCRIPTION = "A high-throughput webhook delivery, retry, and ingestion engine."
+_APP_VERSION = "1.0.0"
+
 app = FastAPI(
-    title="Hook Relay API",
-    description="A simple API for relaying webhooks.",
-    version="1.0",
+    title=_APP_NAME,
+    description=_APP_DESCRIPTION,
+    version=_APP_VERSION,
     lifespan=lifespan,
+    docs_url=settings.docs_url,
+    redoc_url=settings.redoc_url,
+    openapi_url=settings.openapi_url,
+    openapi_tags=_OPENAPI_TAGS,
+    swagger_ui_parameters=_SWAGGER_UI_PARAMETERS,
 )
 register_exception_handlers(app)
 
@@ -52,13 +90,14 @@ app.include_router(v1_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["Health"])
-def health_check() -> dict[str, str]:
+def health_check() -> dict[str, Any]:
     return {
-        "name": "hook-relay-api",
-        "version": "1.0",
+        "name": _APP_NAME,
+        "version": _APP_VERSION,
         "status": "healthy",
-        "docs_url": "/docs",
-        "redoc_url": "/redoc",
+        "docs_url": settings.docs_url,
+        "redoc_url": settings.redoc_url,
+        "openapi_url": settings.openapi_url,
     }
 
 

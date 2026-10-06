@@ -16,6 +16,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 
 from src.api.deps import get_db
+from src.main import _APP_NAME, _APP_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -28,11 +29,12 @@ async def test_health_check_returns_healthy(async_client: AsyncClient):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "hook-relay-api"
+    assert data["name"] == _APP_NAME
     assert data["status"] == "healthy"
-    assert data["version"] == "1.0"
+    assert data["version"] == _APP_VERSION
     assert data["docs_url"] == "/docs"
     assert data["redoc_url"] == "/redoc"
+    assert data["openapi_url"] == "/openapi.json"
 
 
 # ---------------------------------------------------------------------------

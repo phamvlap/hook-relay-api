@@ -46,6 +46,25 @@ class Settings(BaseSettings):
         default="*",
         description="Comma-separated list of allowed hosts for the application",
     )
+
+    # API Documentation configuration
+    docs_enabled: bool = Field(
+        default=True,
+        description="Enable Swagger UI, ReDoc, and OpenAPI schema endpoints (strictly disabled in production regardless of this setting)",
+    )
+    docs_url_path: str = Field(
+        default="/docs",
+        description="Custom route path for Swagger UI",
+    )
+    redoc_url_path: str = Field(
+        default="/redoc",
+        description="Custom route path for ReDoc",
+    )
+    openapi_url_path: str = Field(
+        default="/openapi.json",
+        description="Custom route path for OpenAPI JSON schema",
+    )
+
     # CORS configuration
     cors_enabled: bool = Field(
         default=True,
@@ -316,6 +335,29 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
         return origins
+
+    @property
+    def is_docs_enabled(self) -> bool:
+        """Determines if API docs should be enabled.
+
+        Strict security guardrail: Always False in production regardless of configuration.
+        In non-production environments, respects the docs_enabled setting.
+        """
+        if self.is_production:
+            return False
+        return self.docs_enabled
+
+    @property
+    def docs_url(self) -> str | None:
+        return self.docs_url_path if self.is_docs_enabled else None
+
+    @property
+    def redoc_url(self) -> str | None:
+        return self.redoc_url_path if self.is_docs_enabled else None
+
+    @property
+    def openapi_url(self) -> str | None:
+        return self.openapi_url_path if self.is_docs_enabled else None
 
     @cached_property
     def trusted_proxy_networks(self) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
