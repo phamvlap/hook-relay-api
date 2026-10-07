@@ -1,0 +1,129 @@
+# Ruff configuration for Hook Relay API (FastAPI + SQLAlchemy + Celery)
+# Target Python version: 3.13
+target-version = "py313"
+line-length = 100
+indent-width = 4
+src = ["src", "."]
+
+# Exclude common directories, temporary/cache artifacts, and local scratch files
+exclude = [
+  ".git",
+  ".venv",
+  ".vscode",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".mypy_cache",
+  "htmlcov",
+  ".coverage",
+  "celerybeat-schedule",
+  "dist",
+  "build",
+  "*.egg-info",
+  "alembic/versions",
+  "archives.py",
+  "test.py",
+  "test.sh",
+  "test.lua",
+]
+
+[lint]
+select = [
+  "E",     # pycodestyle errors
+  "W",     # pycodestyle warnings
+  "F",     # pyflakes
+  "I",     # isort
+  "B",     # flake8-bugbear
+  "C4",    # flake8-comprehensions
+  "UP",    # pyupgrade
+  "ARG",   # flake8-unused-arguments
+  "SIM",   # flake8-simplify
+  "DTZ",   # flake8-datetimez (enforce timezone-aware datetimes)
+  "PIE",   # flake8-pie
+  "T20",   # flake8-print (prevent print statements in production code)
+  "RET",   # flake8-return
+  "TRY",   # tryceratops
+  "RUF",   # ruff-specific rules
+  "ASYNC", # flake8-async (async anti-patterns)
+  "S",     # flake8-bandit (security checks)
+  "FAST",  # flake8-fastapi (FastAPI best practices)
+  "T10",   # flake8-debugger (prevent debugger breakpoints)
+  "ISC",   # flake8-implicit-str-concat
+]
+
+ignore = [
+  "E501",    # line too long (handled by formatter)
+  "B008",    # function call in argument defaults (FastAPI Depends/Query/Header)
+  "B904",    # raise-without-from-inside-except (avoid forcing exception chaining)
+  "RUF012",  # mutable class attributes (Pydantic models and SQLAlchemy Declarative)
+  "TRY003",  # long messages outside exception class
+  "TRY300",  # consider moving return to else block
+  "TRY400",  # use logging.exception instead of logging.error
+  "ARG002",  # unused method argument (overrides / interface protocols)
+  "FAST001", # redundant response_model argument (explicit contract preferred)
+  "SIM105",  # use contextlib.suppress instead of try-except-pass
+  "SIM110",  # reimplemented-builtin (explicit loop preferred in security checks)
+  "RET504",  # unnecessary assignment before return (preferred for debugger inspection)
+]
+
+[lint.flake8-unused-arguments]
+ignore-variadic-names = true
+
+[lint.per-file-ignores]
+# Package initialization re-exports and optional noqas
+"__init__.py" = ["F401", "RUF100"]
+
+# Tests: allow asserts, fixture parameter injection, mock secrets, and pre-import env loading
+"tests/**" = [
+  "ARG",  # pytest fixtures injected as function parameters
+  "S101", # asserts in pytest
+  "S104", # binding to 0.0.0.0 in SSRF test assertions
+  "S105", # hardcoded dummy tokens/passwords in fixtures and tests
+  "S106", # hardcoded dummy tokens/passwords in fixtures and tests
+  "S107", # hardcoded dummy passwords in fixtures and tests
+  "E402", # module-level import not at top of file (pre-loading .env.test in conftest.py)
+]
+
+# Database migrations: auto-generated files with template typing and unused imports
+"alembic/versions/**" = ["ALL"]
+"alembic/env.py" = [
+  "F401",   # unused imports in Alembic environment config
+  "F403",   # wildcard import from src.models
+  "ERA001", # commented-out code in Alembic template
+]
+
+# CLI commands: allow print statements and sys.path adjustments before imports
+"src/cli.py" = ["T201", "E402"]
+
+# API dependency re-exports grouped at end of module
+"src/api/deps.py" = ["E402"]
+
+# FastAPI lifespan and exception handlers require specific framework signatures
+"src/lifespan.py" = ["ARG001"]
+"src/core/error_handlers.py" = ["ARG001"]
+
+# Non-cryptographic retry jitter intentionally uses random.uniform
+"src/core/retry/jitter.py" = ["S311"]
+
+# Custom HTTP transport overrides connect() with timeout parameter matching httpx signature
+"src/core/ssrf.py" = ["ASYNC109"]
+
+# Rate limiting Lua script and default secret prefix are false positives for hardcoded secrets
+"src/core/rate_limit/lua_scripts.py" = ["S105"]
+"src/utils/endpoint.py" = ["S105"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+
+[lint.isort]
+known-first-party = ["src"]
+section-order = [
+  "future",
+  "standard-library",
+  "third-party",
+  "first-party",
+  "local-folder",
+]
