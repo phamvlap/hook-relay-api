@@ -5,7 +5,7 @@ from fastapi import Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.pagination import PageNumberPaginationParams
-from src.database.session import AsyncLocalSession, LocalSession
+from src.database.session import AsyncLocalSession
 from src.repositories.delivery import DeliveryAttemptRepository, DeliveryRepository
 from src.repositories.endpoint import EndpointRepository, EndpointSecretRepository
 from src.repositories.event import EventRepository
@@ -14,7 +14,7 @@ from src.services.endpoint import EndpointService
 from src.services.event import EventService
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_db() -> AsyncGenerator[AsyncSession]:
     session: AsyncSession = AsyncLocalSession()
     try:
         yield session

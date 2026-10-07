@@ -196,7 +196,6 @@ class TestRetryPolicy:
 @pytest.mark.unit
 class TestRetryPresets:
     def test_webhook_delivery_policy_preset(self):
-
         assert webhook_delivery_policy.max_retries == 5
         assert webhook_delivery_policy.max_delay == 3600.0
         assert webhook_delivery_policy.max_retry_after == 1800.0

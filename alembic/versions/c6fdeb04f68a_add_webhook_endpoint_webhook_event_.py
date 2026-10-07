@@ -1,7 +1,7 @@
 """add webhook endpoint, webhook event, webhook delivery models
 
 Revision ID: c6fdeb04f68a
-Revises: 
+Revises:
 Create Date: 2026-09-13 16:05:33.947536
 
 """

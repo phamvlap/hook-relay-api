@@ -129,9 +129,7 @@ class EventRepository:
             .group_by(WebhookDelivery.status)
         )
         delivery_res = await self.session.execute(delivery_status_stmt)
-        delivery_status_counts = {
-            row[0]: row[1] for row in delivery_res.all()
-        }
+        delivery_status_counts = {row[0]: row[1] for row in delivery_res.all()}
 
         resolved_status = resolve_event_status(delivery_status_counts)
 

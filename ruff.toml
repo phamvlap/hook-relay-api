@@ -20,10 +20,6 @@ exclude = [
   "build",
   "*.egg-info",
   "alembic/versions",
-  "archives.py",
-  "test.py",
-  "test.sh",
-  "test.lua",
 ]
 
 [lint]
