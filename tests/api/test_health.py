@@ -64,12 +64,17 @@ async def test_readiness_check_success(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "hook-relay-api"
+    assert data["name"] == _APP_NAME
     assert data["status"] == "ready"
-    assert data["version"] == "1.0"
     assert "services" in data
-    assert data["services"]["database"] == "connected"
-    assert data["services"]["redis"] == "connected"
+    assert data["services"]["database"] == {
+        "status": "up",
+        "error_message": None,
+    }
+    assert data["services"]["redis"] == {
+        "status": "up",
+        "error_message": None,
+    }
     mock_session.execute.assert_awaited_once()
     mock_redis.ping.assert_awaited_once()
 
@@ -80,7 +85,7 @@ async def test_readiness_check_fails_on_db_disconnect(
     async_client: AsyncClient,
     mocker,
 ):
-    """Verifies that /ready returns 503 and marks database as disconnected."""
+    """Verifies that /ready returns 503 and marks database as down with error message."""
     mock_session = AsyncMock()
     mock_session.execute.side_effect = SQLAlchemyOperationalError(
         statement="SELECT 1",
@@ -98,10 +103,15 @@ async def test_readiness_check_fails_on_db_disconnect(
 
     assert response.status_code == 503
     data = response.json()
+    assert data["name"] == _APP_NAME
     assert data["status"] == "not_ready"
     assert "services" in data
-    assert data["services"]["database"] == "disconnected"
-    assert data["services"]["redis"] == "connected"
+    assert data["services"]["database"]["status"] == "down"
+    assert "Connection refused" in data["services"]["database"]["error_message"]
+    assert data["services"]["redis"] == {
+        "status": "up",
+        "error_message": None,
+    }
 
 
 @pytest.mark.api
@@ -110,7 +120,7 @@ async def test_readiness_check_fails_on_redis_disconnect(
     async_client: AsyncClient,
     mocker,
 ):
-    """Verifies that /ready returns 503 and marks redis as disconnected."""
+    """Verifies that /ready returns 503 and marks redis as down with error message."""
     # DB is reachable
     mock_session = AsyncMock()
     mock_session.execute.return_value = None
@@ -125,10 +135,15 @@ async def test_readiness_check_fails_on_redis_disconnect(
 
     assert response.status_code == 503
     data = response.json()
+    assert data["name"] == _APP_NAME
     assert data["status"] == "not_ready"
     assert "services" in data
-    assert data["services"]["database"] == "connected"
-    assert data["services"]["redis"] == "disconnected"
+    assert data["services"]["database"] == {
+        "status": "up",
+        "error_message": None,
+    }
+    assert data["services"]["redis"]["status"] == "down"
+    assert "Redis connection refused" in data["services"]["redis"]["error_message"]
 
 
 @pytest.mark.api
@@ -137,7 +152,7 @@ async def test_readiness_check_fails_when_both_disconnect(
     async_client: AsyncClient,
     mocker,
 ):
-    """Verifies that /ready returns 503 and marks both services as disconnected."""
+    """Verifies that /ready returns 503 and marks both services as down with error messages."""
     mock_session = AsyncMock()
     mock_session.execute.side_effect = SQLAlchemyOperationalError(
         statement="SELECT 1",
@@ -154,10 +169,13 @@ async def test_readiness_check_fails_when_both_disconnect(
 
     assert response.status_code == 503
     data = response.json()
+    assert data["name"] == _APP_NAME
     assert data["status"] == "not_ready"
     assert "services" in data
-    assert data["services"]["database"] == "disconnected"
-    assert data["services"]["redis"] == "disconnected"
+    assert data["services"]["database"]["status"] == "down"
+    assert "Connection refused" in data["services"]["database"]["error_message"]
+    assert data["services"]["redis"]["status"] == "down"
+    assert "Redis connection refused" in data["services"]["redis"]["error_message"]
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +193,7 @@ async def test_celery_health_check_healthy(async_client: AsyncClient, mocker):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "hook-relay-celery"
+    assert data["name"] == "Hook Relay Celery"
     assert data["status"] == "healthy"
     assert data["active_workers_count"] == 1
     assert "celery@worker1" in data["workers"]
@@ -194,6 +212,7 @@ async def test_celery_health_check_no_workers_returns_503(async_client: AsyncCli
 
     assert response.status_code == 503
     data = response.json()
+    assert data["name"] == "Hook Relay Celery"
     assert data["status"] == "unhealthy"
     assert data["active_workers_count"] == 0
     assert "No active Celery workers" in data["error_message"]
@@ -214,6 +233,7 @@ async def test_celery_health_check_operational_error_returns_503(
 
     assert response.status_code == 503
     data = response.json()
+    assert data["name"] == "Hook Relay Celery"
     assert data["status"] == "unhealthy"
     assert "Cannot connect to broker" in data["error_message"]
 

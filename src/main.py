@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Any
 
 from celery.exceptions import CeleryError
@@ -17,6 +18,8 @@ from src.core.error_handlers import register_exception_handlers
 from src.infrastructure.redis.client import get_async_redis_client
 from src.lifespan import lifespan
 from src.tasks.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 # Swagger UI developer experience configuration
 _SWAGGER_UI_PARAMETERS = {
@@ -103,41 +106,67 @@ def health_check() -> dict[str, Any]:
 
 @app.get("/ready", tags=["Health"])
 async def readiness_check(session: SessionDep, response: Response) -> dict[str, Any]:
-    services: dict[str, str] = {
-        "database": "connected",
-        "redis": "connected",
+    """Readiness probe validating connectivity to PostgreSQL and Redis.
+
+    Returns service state as 'up' or 'down'. If any critical dependency is down,
+    returns 503 Service Unavailable with descriptive error details.
+    """
+    _UP_STATUS = "up"
+    _DOWN_STATUS = "down"
+    _READY_STATUS = "ready"
+    _NOT_READY_STATUS = "not_ready"
+
+    services: dict[str, dict[str, Any]] = {
+        "database": {
+            "status": _UP_STATUS,
+            "error_message": None,
+        },
+        "redis": {
+            "status": _UP_STATUS,
+            "error_message": None,
+        },
     }
-    is_ready = True
 
     # 1. Check PostgreSQL database connection
     try:
         await session.execute(text("SELECT 1"))
-    except SQLAlchemyError:
-        services["database"] = "disconnected"
-        is_ready = False
+    except (SQLAlchemyError, OSError, TimeoutError) as exc:
+        services["database"] = {
+            "status": _DOWN_STATUS,
+            "error_message": str(exc),
+        }
 
     # 2. Check Redis connection
     try:
         redis_client = get_async_redis_client()
         await redis_client.ping()
-    except RedisError:
-        services["redis"] = "disconnected"
-        is_ready = False
-
-    # 3. If any dependency is down, return 503 Service Unavailable
-    if not is_ready:
-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return {
-            "name": "hook-relay-api",
-            "version": "1.0",
-            "status": "not_ready",
-            "services": services,
+    except (RedisError, OSError, TimeoutError) as exc:
+        services["redis"] = {
+            "status": _DOWN_STATUS,
+            "error_message": str(exc),
         }
 
+    ready_status = (
+        _READY_STATUS
+        if all(service["status"] == _UP_STATUS for service in services.values())
+        else _NOT_READY_STATUS
+    )
+
+    # 3. If any dependency is down, return 503 Service Unavailable
+    if ready_status == _NOT_READY_STATUS:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        logger.warning(
+            "Readiness probe failed: %s",
+            {
+                name: service["error_message"]
+                for name, service in services.items()
+                if service["status"] == _DOWN_STATUS
+            },
+        )
+
     return {
-        "name": "hook-relay-api",
-        "version": "1.0",
-        "status": "ready",
+        "name": _APP_NAME,
+        "status": ready_status,
         "services": services,
     }
 
@@ -176,8 +205,7 @@ async def celery_health_check(response: Response) -> dict[str, Any]:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return {
-        "name": "hook-relay-celery",
-        "version": "1.0",
+        "name": "Hook Relay Celery",
         "status": "healthy" if is_healthy else "unhealthy",
         "active_workers_count": len(worker_nodes),
         "workers": worker_nodes,
