@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 
 .PHONY: help install dev-install lint lint-fix format format-check pre-commit clean \
-        run celery-worker celery-beat init-migrations make-migrations migrate downgrade \
+        run celery-worker celery-beat flower init-migrations make-migrations migrate downgrade \
         test test-unit test-api test-integration test-cov
 
 help:
@@ -24,6 +24,7 @@ help:
 	@echo "  make run                 Start FastAPI development server with reload"
 	@echo "  make celery-worker       Start Celery worker process"
 	@echo "  make celery-beat         Start Celery beat periodic scheduler"
+	@echo "  make flower              Start Celery Flower web monitor dashboard (port 5555)"
 	@echo ""
 	@echo "Database Migrations:"
 	@echo "  make init-migrations     Initialize Alembic migrations directory"
@@ -88,6 +89,9 @@ celery-worker:
 
 celery-beat:
 	uv run celery -A src.tasks.celery_app beat --loglevel=info
+
+flower:
+	uv run celery -A src.tasks.celery_app flower --port=$(or $(port),5555)
 
 # ---------------------------------------------------------------------------
 # Database migrations
