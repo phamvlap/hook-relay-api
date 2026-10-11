@@ -203,6 +203,74 @@ Celery Beat handles:
 
 ---
 
+## Running with Docker
+
+Hook Relay API includes an optimized multi-stage Dockerfile producing a minimal footprint (~290MB), non-root container image.
+
+### 1. Build the Docker Image
+```bash
+make docker-build
+# Or directly:
+docker build -t hook-relay-api:latest .
+```
+
+### 2. Run Database Migrations
+Before starting the web server or workers, apply database migrations inside a container:
+```bash
+make docker-migrate
+# Or directly:
+docker run --rm -it --env-file .env hook-relay-api:latest alembic upgrade head
+```
+
+### 3. Start the Web API Server
+```bash
+make docker-run
+# Or directly:
+docker run --rm -it -p 8000:8000 --env-file .env --name hook-relay-web hook-relay-api:latest
+```
+Access the application at `http://localhost:8000`:
+- **Liveness Probe**: `http://localhost:8000/health`
+- **Readiness Probe**: `http://localhost:8000/ready`
+- **Interactive Swagger Docs**: `http://localhost:8000/docs`
+
+### 4. Start Celery Background Services
+In separate terminal windows or as background processes:
+
+**Celery Worker (Webhook Dispatcher):**
+```bash
+make docker-worker
+# Or directly:
+docker run --rm -it --env-file .env --name hook-relay-worker hook-relay-api:latest celery -A src.tasks.celery_app worker --loglevel=info
+```
+
+**Celery Beat (Periodic Scheduler & Reaper):**
+```bash
+make docker-beat
+# Or directly:
+docker run --rm -it --env-file .env --name hook-relay-beat hook-relay-api:latest celery -A src.tasks.celery_app beat --loglevel=info
+```
+
+### 5. Administrative CLI with Docker
+Execute administrative commands inside a container:
+```bash
+# View CLI help:
+make docker-cli cmd="--help"
+
+# Create a tenant owner with an API key:
+make docker-cli cmd="create-owner --name my-tenant --env live"
+
+# Or directly:
+docker run --rm -it --env-file .env hook-relay-api:latest hook-relay-cli --help
+```
+
+### 6. Clean Up Containers
+Stop and remove all running project containers:
+```bash
+make docker-clean
+```
+
+---
+
 ## API Overview
 
 All `/api/v1` routes require authentication via header: `Authorization: Bearer <API_KEY>`.

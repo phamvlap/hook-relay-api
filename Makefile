@@ -1,8 +1,13 @@
 .DEFAULT_GOAL := help
 
+IMAGE_NAME ?= hook-relay-api
+IMAGE_TAG ?= latest
+PORT ?= 8000
+
 .PHONY: help install dev-install lint lint-fix format format-check pre-commit clean \
         run celery-worker celery-beat flower init-migrations make-migrations migrate downgrade \
-        test test-unit test-api test-integration test-cov
+        test test-unit test-api test-integration test-cov \
+        docker-build docker-run docker-worker docker-beat docker-migrate docker-cli docker-clean
 
 help:
 	@echo "Hook Relay API - Development Commands"
@@ -25,6 +30,15 @@ help:
 	@echo "  make celery-worker       Start Celery worker process"
 	@echo "  make celery-beat         Start Celery beat periodic scheduler"
 	@echo "  make flower              Start Celery Flower web monitor dashboard (port 5555)"
+	@echo ""
+	@echo "Docker Operations:"
+	@echo "  make docker-build        Build optimized multi-stage Docker image"
+	@echo "  make docker-run          Run FastAPI web server container (port $(PORT))"
+	@echo "  make docker-worker       Run Celery worker container"
+	@echo "  make docker-beat         Run Celery beat periodic scheduler container"
+	@echo "  make docker-migrate      Run database migrations inside Docker"
+	@echo "  make docker-cli          Run CLI inside Docker (e.g. make docker-cli cmd=\"--help\")"
+	@echo "  make docker-clean        Stop and remove all running project containers"
 	@echo ""
 	@echo "Database Migrations:"
 	@echo "  make init-migrations     Initialize Alembic migrations directory"
@@ -92,6 +106,31 @@ celery-beat:
 
 flower:
 	uv run celery -A src.tasks.celery_app flower --port=$(or $(port),5555)
+
+# ---------------------------------------------------------------------------
+# Docker operations
+# ---------------------------------------------------------------------------
+docker-build:
+	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+
+docker-run:
+	docker run --rm -it -p $(PORT):8000 --env-file .env --name $(IMAGE_NAME)-web $(IMAGE_NAME):$(IMAGE_TAG)
+
+docker-worker:
+	docker run --rm -it --env-file .env --name $(IMAGE_NAME)-worker $(IMAGE_NAME):$(IMAGE_TAG) celery -A src.tasks.celery_app worker --loglevel=info
+
+docker-beat:
+	docker run --rm -it --env-file .env --name $(IMAGE_NAME)-beat $(IMAGE_NAME):$(IMAGE_TAG) celery -A src.tasks.celery_app beat --loglevel=info
+
+docker-migrate:
+	docker run --rm -it --env-file .env $(IMAGE_NAME):$(IMAGE_TAG) alembic upgrade head
+
+docker-cli:
+	docker run --rm -it --env-file .env $(IMAGE_NAME):$(IMAGE_TAG) hook-relay-cli $(cmd)
+
+docker-clean:
+	docker stop $(IMAGE_NAME)-web $(IMAGE_NAME)-worker $(IMAGE_NAME)-beat 2>/dev/null || true
+	docker rm $(IMAGE_NAME)-web $(IMAGE_NAME)-worker $(IMAGE_NAME)-beat 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Database migrations
