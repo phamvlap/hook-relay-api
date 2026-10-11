@@ -1,0 +1,58 @@
+# Fly.io configuration for hook-relay-api
+app = "hook-relay-api"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Automatically execute Alembic migrations on deployment before starting new machines
+  release_command = "alembic upgrade head"
+
+[env]
+  PORT = "8000"
+  ALLOWED_HOSTS = "*"
+
+# Multi-process architecture: web API, Celery worker, and periodic Celery beat scheduler
+[processes]
+  app = "uvicorn src.main:app --host 0.0.0.0 --port 8000"
+  worker = "celery -A src.tasks.celery_app worker --loglevel=info"
+  beat = "celery -A src.tasks.celery_app beat --loglevel=info"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "15s"
+  method = "GET"
+  timeout = "2s"
+  path = "/health"
+
+[[vm]]
+  processes = ["app"]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[vm]]
+  processes = ["worker"]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[[vm]]
+  processes = ["beat"]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

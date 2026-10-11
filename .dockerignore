@@ -1,0 +1,77 @@
+# Version Control
+.git/
+.gitignore
+.gitattributes
+
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments & Build Artifacts
+.venv/
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Secrets & Environment Variables (Fly.io injects secrets via `fly secrets set`)
+.env
+.env.*
+
+# Testing & Code Quality
+tests/
+.pytest_cache/
+.ruff_cache/
+ruff.toml
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+pytest.ini
+.pre-commit-config.yaml
+
+# Celery & Local Runtime State
+celerybeat-schedule*
+*.log
+*.pid
+db.sqlite3
+media/
+
+# IDE & System Files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation & CI/Deployment Configs
+docs/
+Makefile
+fly.toml
+Dockerfile*
+docker-compose*.yml
+.dockerignore
