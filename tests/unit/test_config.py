@@ -1,7 +1,7 @@
 """Unit tests for Settings validation and property derivations."""
 
 import pytest
-from pydantic import SecretStr
+from pydantic import RedisDsn, SecretStr
 
 from src.core.config import Settings
 
@@ -86,4 +86,63 @@ class TestSettingsValidation:
             in settings.postgres_async_dsn_str
         )
         assert "redis://redis.example.com:6379/2" in settings.redis_dsn_str
+        assert "redis://redis.example.com:6379/2" in settings.celery_redis_dsn_str
+        assert "ssl_cert_reqs" not in settings.celery_redis_dsn_str
         assert settings.rate_limit_enabled is True
+
+    def test_celery_redis_dsn_with_ssl_appends_cert_reqs(self):
+        settings = Settings(
+            db_host="localhost",
+            db_port=5432,
+            db_name="test_db",
+            db_username="postgres",
+            db_password=SecretStr("postgres"),
+            redis_host="secure-redis.example.com",
+            redis_port=6379,
+            redis_db=1,
+            redis_enabled_ssl=True,
+            api_key_pepper=SecretStr("valid_pepper_12_chars"),
+            endpoint_secret_encryption_key=SecretStr("valid_key_12_chars_long"),
+        )
+
+        assert "rediss://secure-redis.example.com:6379/1" in settings.redis_dsn_str
+        assert "ssl_cert_reqs" not in settings.redis_dsn_str
+        assert (
+            "rediss://secure-redis.example.com:6379/1?ssl_cert_reqs=CERT_NONE"
+            in settings.celery_redis_dsn_str
+        )
+
+    def test_celery_redis_dsn_with_custom_url(self):
+        settings = Settings(
+            db_host="localhost",
+            db_port=5432,
+            db_name="test_db",
+            db_username="postgres",
+            db_password=SecretStr("postgres"),
+            redis_host="localhost",
+            redis_port=6379,
+            redis_db=0,
+            redis_url=RedisDsn("rediss://default:mypass@cloud.redis.io:6379/0?timeout=5"),
+            api_key_pepper=SecretStr("valid_pepper_12_chars"),
+            endpoint_secret_encryption_key=SecretStr("valid_key_12_chars_long"),
+        )
+
+        assert "rediss://default:mypass@cloud.redis.io:6379/0" in settings.celery_redis_dsn_str
+        assert "ssl_cert_reqs=CERT_NONE" in settings.celery_redis_dsn_str
+        assert "timeout=5" in settings.celery_redis_dsn_str
+
+    def test_redis_ssl_cert_reqs_validation_rejects_invalid_value(self):
+        with pytest.raises(ValueError, match="redis_ssl_cert_reqs must be one of"):
+            Settings(
+                db_host="localhost",
+                db_port=5432,
+                db_name="test_db",
+                db_username="postgres",
+                db_password=SecretStr("postgres"),
+                redis_host="localhost",
+                redis_port=6379,
+                redis_db=0,
+                redis_ssl_cert_reqs="INVALID_MODE",
+                api_key_pepper=SecretStr("valid_pepper_12_chars"),
+                endpoint_secret_encryption_key=SecretStr("valid_key_12_chars_long"),
+            )

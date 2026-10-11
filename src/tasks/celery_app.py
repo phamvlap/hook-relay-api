@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 celery_app = Celery(
     "hook_relay",
-    broker=settings.redis_dsn_str,
-    backend=settings.redis_dsn_str,
+    broker=settings.celery_redis_dsn_str,
+    backend=settings.celery_redis_dsn_str,
 )
 
 celery_app.conf.update(

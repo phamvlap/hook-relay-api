@@ -1,5 +1,6 @@
 import ipaddress
 from functools import cached_property, lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import Field, PostgresDsn, RedisDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -179,6 +180,10 @@ class Settings(BaseSettings):
     redis_username: str | None = Field(default=None, description="Redis username (optional)")
     redis_db: int = Field(ge=0, le=10, description="Redis database")
     redis_enabled_ssl: bool = Field(default=False, description="Enable SSL for Redis connection")
+    redis_ssl_cert_reqs: str = Field(
+        default="CERT_NONE",
+        description="SSL certificate requirements for Celery Redis connection when SSL is enabled ('CERT_NONE', 'CERT_OPTIONAL', 'CERT_REQUIRED')",
+    )
 
     redis_url: RedisDsn | None = Field(
         default=None,
@@ -256,6 +261,14 @@ class Settings(BaseSettings):
 
         return value
 
+    @field_validator("redis_ssl_cert_reqs")
+    def validate_redis_ssl_cert_reqs(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        allowed = {"CERT_NONE", "CERT_OPTIONAL", "CERT_REQUIRED"}
+        if normalized not in allowed:
+            raise ValueError(f"redis_ssl_cert_reqs must be one of {allowed}, got '{value}'")
+        return normalized
+
     @cached_property
     def postgres_dsn(self) -> PostgresDsn:
         if self.database_url:
@@ -317,6 +330,56 @@ class Settings(BaseSettings):
     @cached_property
     def redis_dsn_str(self) -> str:
         return str(self.redis_dsn)
+
+    @cached_property
+    def celery_redis_dsn(self) -> RedisDsn:
+        """Constructs Celery-compatible Redis DSN.
+
+        When SSL is enabled (via `redis_enabled_ssl=True` or a `rediss://` URL),
+        Celery's Kombu broker and Redis result backend require `ssl_cert_reqs=CERT_NONE`
+        (or the configured mode) in the query parameters to prevent certificate verification
+        failures with cloud-managed Redis (Upstash, AWS ElastiCache) or self-signed certs.
+
+        When SSL is disabled, query parameters are omitted to avoid invalid transport options.
+        """
+        if self.redis_url:
+            raw_url = str(self.redis_url)
+            is_ssl = self.redis_enabled_ssl or raw_url.startswith("rediss://")
+            if not is_ssl:
+                return self.redis_url
+
+            parsed = urlsplit(raw_url)
+            query_params = dict(parse_qsl(parsed.query))
+            if "ssl_cert_reqs" not in query_params:
+                query_params["ssl_cert_reqs"] = self.redis_ssl_cert_reqs
+
+            new_scheme = "rediss" if is_ssl else parsed.scheme
+            new_url = urlunsplit(
+                (
+                    new_scheme,
+                    parsed.netloc,
+                    parsed.path,
+                    urlencode(query_params),
+                    parsed.fragment,
+                )
+            )
+            return RedisDsn(new_url)
+
+        scheme = "rediss" if self.redis_enabled_ssl else "redis"
+        query = f"ssl_cert_reqs={self.redis_ssl_cert_reqs}" if self.redis_enabled_ssl else None
+        return RedisDsn.build(
+            scheme=scheme,
+            username=self.redis_username,
+            password=self.redis_password.get_secret_value() if self.redis_password else None,
+            host=self.redis_host,
+            port=self.redis_port,
+            path=str(self.redis_db),
+            query=query,
+        )
+
+    @cached_property
+    def celery_redis_dsn_str(self) -> str:
+        return str(self.celery_redis_dsn)
 
     @property
     def api_key_pepper_value(self) -> str:
